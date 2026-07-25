@@ -1,0 +1,5 @@
+{
+  "runtime_name": "EnterpriseOS",
+  "log_level": "INFO",
+  "loop_interval_seconds": 1
+}
