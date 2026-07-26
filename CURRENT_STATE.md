@@ -1,140 +1,349 @@
-# EnterpriseOS - Current State Report (v1.0 RC)
+# EnterpriseOS — Current State Report (v1.0 RC)
+
+_Audit date: 2026-07-26. Based on a full read of the checked-out repository at commit
+`4626e1a` ("EnterpriseOS v1.0 RC codebase"), branch `claude/enterpriseos-v1-release-vw14wd`.
+Every claim below is backed by a file read or a test run performed during this audit —
+nothing is carried over from prior reports without re-verification._
+
+> **Note on provenance:** a previous version of this file described a Windows checkout
+> (`D:\OS`, `sessions/`, `logs/`, `workspace/`, `flask_blog/`) that does not exist in this
+> repository. Those are runtime artifacts from a local run on a different machine, not part
+> of the source tree. This report describes only what is actually committed.
 
 ## 1. Project Version and Maturity
-**Version:** v1.0 Release Candidate (v1.0-RC)
-**Maturity:** The project has successfully transitioned from an architectural framework to a fully executable system. The core loop (`Goal → Reason → Plan → Delegate → Execute → Review → Persist`) has been demonstrated end-to-end with graceful error handling and deterministic decision-making (e.g., yielding `SEEK_APPROVAL` when an execution step fails).
 
-## 2. Directory Tree
+**Version:** v1.0 Release Candidate, single squashed commit — there is no incremental git
+history to mine for regressions; the whole tree landed at once.
+
+**Maturity:** A working vertical slice exists end-to-end: `Goal → Plan → WorkItem →
+ToolCapability execution → Decision → Reflection → Persistence`, exposed over a FastAPI
+REST + WebSocket interface with a static dashboard. The design (hexagonal / ports-and-
+adapters, `ToolCapability`/`Capability` enums as the contract between layers) is sound and
+consistently applied in the *production* code paths. The gap between "designed" and
+"finished" is concentrated in: stale tests, a disconnected approval/governance loop, a
+persistence layer that doesn't actually restore state, and a security policy that is a
+bypassable blocklist rather than an allowlist.
+
+**Test baseline (measured at audit start):** 79 tests, **72 passed, 6 failed, 1 skipped**,
+**85% line coverage** (`pytest --cov=enterprise_os`). All 6 failures were pre-existing and
+attributable to a single root cause (§9, P0-1 in `V1_RELEASE_PLAN.md`) — six tests written
+before the `ToolCapability`/`Capability` enum migration, never updated. P0-1 has since been
+fixed in this session: **78 passed, 1 skipped, 0 failed, 86% coverage.** Fixing the tests
+also exposed one further stale assertion (`test_reasoning_loop_execution` expected the loop
+to stop at `DECIDING`, but `execute_goal` correctly continues on to `EVALUATING` before
+returning) — corrected in the same pass.
+
+## 2. Directory Tree (actual)
+
 ```text
-D:\OS
-├── config/
-├── docs/
-├── flask_blog/             (Workspace execution artifact)
-├── logs/                   (audit.log)
-├── sessions/               (File-based persistence)
-├── tests/                  (79 tests: unit, integration)
-├── workspace/
-└── src/
-    └── enterprise_os/
-        ├── application/    (Ports)
-        ├── bootstrap/      (App initialization)
-        ├── domain/         (Core business logic, CEO rules)
-        ├── governance/     (Policies and rules engines)
-        ├── infrastructure/ (Persistence, Event Stores, Loggers)
-        ├── interfaces/     (FastAPI, WebSocket, Web UI)
-        ├── providers/      (AI and Tools Plugins)
-        │   ├── ai/         (Ollama, MockLLM)
-        │   └── tools/      (Filesystem, Shell, Git, Python)
-        ├── runtime/        (Executive Loop, Session, State)
-        └── worker/         (Sub-execution loop)
+Saahvik_OS/
+├── config/                          system.json, constitution.md, owner_profile.json,
+│                                     company_state.json, memory.json
+├── docs/                            10 MILESTONE_*.md + ROADMAP.md + CODEX protocol +
+│                                     PHASE_01_AI_PLATFORM.md (planning docs, not user docs)
+├── src/enterprise_os/
+│   ├── application/
+│   │   ├── ports/                   ~15 ABC/Protocol interfaces (knowledge, operations,
+│   │   │                            research_provider, etc.) — many are pure stubs
+│   │   ├── services/, use_cases/    domain orchestration for the 8 "milestone" cognitive
+│   │                                domains (strategy, ops, org, research, knowledge,
+│   │                                optimisation, growth, evolution)
+│   ├── bootstrap/                   app wiring / startup (`drive_ceo.py`, `main.py` entry)
+│   ├── domain/                      13 subpackages: ceo, cognition, approvals, employees,
+│   │                                departments, projects, workflows, memory, owner, shared,
+│   │                                + the 8 milestone domains above
+│   ├── governance/                  ApprovalEngine, PolicyEngine, WorkspaceConfinementPolicy,
+│   │                                CommandRestrictionPolicy
+│   ├── infrastructure/              persistence, event_store, ai config, dummy_provider.py,
+│   │                                file_document_loader.py
+│   ├── interfaces/
+│   │   ├── api/                     ceo_api.py (FastAPI app + wiring), websocket.py
+│   │   ├── cli/, events/, web/      static dashboard (HTML/JS)
+│   ├── providers/
+│   │   ├── ai/                      Capability enum, AIRouter, ModelRegistry, OllamaProvider,
+│   │   │                            OllamaClient, cache/health/metrics
+│   │   └── tools/                   ToolCapability enum, ToolRegistry (auto-discovery),
+│   │       └── implementations/     ToolRouter, Filesystem/Shell/Python/Git/Browser providers
+│   ├── runtime/                     ExecutiveSession, ExecutiveState, ReasoningLoop, Goal,
+│   │                                Plan, Step, Decision, EventDispatcher, persistence
+│   └── worker/                      WorkerLoop, WorkerSession, WorkItem/StructuredResult
+├── tests/
+│   ├── unit/                        43 files across application/domain/governance/
+│   │                                infrastructure/providers/runtime/worker
+│   └── integration/                 3 files (ceo_runtime, file_action_logger, file_thought_logger)
+├── main.py, drive_ceo.py            entrypoints
+└── pyproject.toml                   deps: fastapi, uvicorn only; no lint/type/test tooling pinned
 ```
 
+190 Python files under `src/`, ~5.1k LOC in `src/`, ~1.9k LOC in `tests/`.
+
 ## 3. Architecture Overview
-EnterpriseOS follows a strict Domain-Driven Design (DDD) and Hexagonal Architecture. 
-The system separates the "Digital CEO" (cognitive domains, strategic planning) from the "Runtime" (execution, state transitions). Execution of environment-modifying actions is handled via generic `AIPort` and `ToolPort` interfaces, ensuring the CEO logic never directly touches physical models or file systems.
 
-## 4. Core Modules
-- **Cognitive Engine:** The reasoning core of the CEO.
-- **Orchestrators (10 Milestones):** Strategy, Operations, Organisation, Research, Knowledge, Optimisation, Growth, Evolution. 
-- **Governance:** `ApprovalEngine` enforces rules before actions are committed.
+Hexagonal architecture, consistently applied where it matters:
 
-## 5. Runtime Components
-- **ExecutiveRuntime / ReasoningLoop:** Drives state machines (`PLANNING` -> `EXECUTING` -> `DECIDING` -> `EVALUATING`).
-- **WorkerLoop:** Handles the translation of abstract AI steps into concrete Tool Capability invocations.
-- **State Management:** `ExecutiveSession`, `Goal`, `Plan`, `Step`, `Decision`.
+- **Domain** (`domain/`) — plain dataclasses/business rules, no I/O.
+- **Application** (`application/ports`, `services`, `use_cases`) — orchestration behind
+  `Protocol`/`ABC` ports.
+- **Providers** (`providers/ai`, `providers/tools`) — concrete adapters, each with a
+  `capabilities: list[Capability|ToolCapability]` and an `execute()` method, discovered
+  automatically by `ToolRegistry.auto_discover()` / the AI equivalent.
+- **Governance** (`governance/`) — a `PolicyEngine` that gates tool execution, and an
+  `ApprovalEngine` that queues human-in-the-loop approvals — see §7, these two are not
+  wired together.
+- **Interfaces** (`interfaces/api`) — FastAPI app assembling all of the above by hand in
+  `ceo_api.py` (no DI container; wiring is procedural at module import time).
 
-## 6. AI Platform Status
-- **Dynamic Discovery:** Providers are auto-discovered via the `registry`.
-- **Routing:** The `AIRouter` maps capabilities (e.g., `PLANNING`, `TOOL_SELECTION`) to specific models based on performance criteria.
-- **Status:** Functional. Mix of `MockAIPort` for rapid testing and `OllamaProvider` for live inference.
+The **`ToolCapability`/`Capability` enum contract** is the load-bearing design decision of
+this codebase: `ReasoningLoop → WorkerLoop → ToolPort.execute_tool(capability, args) →
+ToolRouter.route(capability) → Provider.execute(ToolRequest(tool_name=capability.name))`.
+This is used correctly and consistently in every *production* call site. The only place it
+is violated is in tests that predate the enum migration (§9, P0-1).
 
-## 7. Tool Platform Status
-- **Capability System:** Tools are strictly identified by `ToolCapability` enums (e.g., `FILE_WRITE`, `SHELL_EXECUTE`).
-- **Auto-Discovery:** Tools self-register via class property introspection (`capabilities`).
-- **Status:** Fully functional and integrated into the `WorkerLoop`.
+## 4. Runtime Flow
 
-## 8. Governance Status
-- **Approval Engine:** Intercepts execution via `PolicyEnforcedToolPort`.
-- **Active Policies:** `WorkspaceConfinementPolicy` (restricts file access to `d:\OS\workspace`), `CommandRestrictionPolicy` (blocks forbidden shell commands).
+`POST /ceo/goal` → `ReasoningLoop.execute_goal()`:
 
-## 9. Interfaces (API/UI)
-- **REST API:** FastAPI application exposing `/health`, `/ceo/goal`, and `/approvals`.
-- **Event Stream:** WebSocket endpoint for real-time UI updates.
-- **Dashboard UI:** A CEO Chat interface built with vanilla JS (`app.js`, `index.html`) listening to server-sent events.
+1. Dispatch `GoalCreated`, transition to `PLANNING`.
+2. `_create_plan()`: prompts `AIPort` with `Capability.PLANNING`, parses a JSON `{"steps":[...]}`
+   response into `Step` objects (falls back to a single "parsing error" step on bad JSON —
+   silent degradation, not a crash).
+3. Loop over steps: transition `EXECUTING` → `_execute_step()` builds a `WorkItem` with a
+   fixed `allowed_tools` list (`PYTHON_EXECUTE, SHELL_EXECUTE, FILE_READ, FILE_WRITE,
+   FILE_LIST`) and hands it to `WorkerLoop`; transition `REFLECTING` →
+   `_reflect_on_step()` (currently just `status == COMPLETED`, no real reflection logic);
+   optionally `RESEARCHING` (`_research()` is a no-op `pass`).
+4. Transition `DECIDING`: if any step `FAILED`, outcome is `SEEK_APPROVAL`, else `PROCEED`.
+5. Transition `EVALUATING`: one more AI call (`Capability.REFLECTION`) for a free-text
+   post-mortem, dispatched as `EvaluationCompleted`.
+6. Dispatch `SessionFinished`.
 
-## 10. Persistence Layer
-- **Status:** File-based MVP.
-- **Components:** `FileSessionRepository` saving JSON payloads to `d:\OS\sessions\`.
-- **Note:** Flagged for a production-grade upgrade (e.g., SQLite/PostgreSQL).
+Every step of the `while True` loop calls `time.sleep(0.5)` unconditionally
+(`reasoning_loop.py:42`) — see P3-1, this is dead weight in both tests and production.
 
-## 11. Event System
-- **EventDispatcher:** Emits domain events (`StepFailed`, `DecisionMade`, `StateTransitioned`).
-- **Logging:** Captured in `d:\OS\logs\audit.log` (FileActionLogger/FileThoughtLogger).
+## 5. Provider Flow
 
-## 12. Worker System
-- **WorkerRuntime:** Receives `WorkItem` tasks, prompts the AI for tool selection, maps response strings back to `ToolCapability`, and invokes the ToolPort. 
+- **AI:** `ModelRegistry` holds discovered models; `AIRouter` maps a `Capability` to a model
+  by routing rules in `AIConfig`; `OllamaProvider`/`OllamaClient` is the only live backend.
+  `LiveAIPort` in `ceo_api.py` currently **hardcodes canned responses** keyed on prompt
+  substrings (`"workspace directory" in prompt`, etc.) instead of calling through the router
+  — i.e. the wiring for live Ollama inference exists (`ai_router`, `live_ai_port` are built)
+  but `LiveAIPort.request_capability` never uses `self.router`. This is demo-scripted, not
+  a bug in the strict sense, but it means **no code path in this repo actually calls a real
+  model at request time** — see P1-4.
+- **Tools:** `ToolRegistry.auto_discover()` reflects over `providers/tools/implementations`,
+  instantiates any class exposing `name`/`capabilities`/`execute`, and registers it.
+  `ToolRouter.route(capability)` linear-scans providers for one whose `capabilities` list
+  contains the requested enum member.
 
-## 13. Current Providers
-- `FilesystemProvider` (`FILE_READ`, `FILE_WRITE`, `FILE_LIST`)
-- `ShellProvider` (`SHELL_EXECUTE`)
-- `PythonProvider` (`PYTHON_EXECUTE`)
-- `GitProvider` (`GIT_EXECUTE`)
-- `BrowserProvider` (`BROWSER_NAVIGATE`, etc.)
+## 6. Governance Flow (⚠ broken — see P0-2)
 
-## 14. Current Models
-Supported via `OllamaProvider`:
-- `DeepSeek R1`
-- `Llama 3.1`
-- `Qwen 2.5`
-- `Qwen 2.5 Coder`
-- `Phi-4`
-- `Gemma2`
+`PolicyEnforcedToolPort.execute_tool()` builds a `ToolRequest`, runs it through
+`PolicyEngine.evaluate()` (currently two policies: `WorkspaceConfinementPolicy`,
+`CommandRestrictionPolicy`), and only calls the underlying port if approved. This part
+works and is tested.
 
-## 15. Test Summary
-- **Suite:** 79 tests (Pytest)
-- **Status:** `72 passed, 6 failed, 1 skipped`
-- **Failures Reason:** The 6 failures are legacy tests (`test_filesystem_provider`, `test_tools.py`, `test_worker_runtime`, `test_runtime`) that were broken when the system was migrated from string-based tool identifiers (e.g., `"read_file"`) to the strict `ToolCapability` Enum system (e.g., `ToolCapability.FILE_READ`). Additionally, reasoning loop tests fail because they assert `PROCEED` despite containing un-executed mock steps.
+**What does not exist:** any connection from `ReasoningLoop`'s `DecisionOutcome.SEEK_APPROVAL`
+to `ApprovalEngine.request_approval()`. `ApprovalEngine` is instantiated in `ceo_api.py` and
+exposed via `GET/POST /approvals`, but nothing ever calls `request_approval()` — grepping the
+entire `src/` tree confirms zero call sites outside the engine's own definition. A goal that
+fails a step gets a `SEEK_APPROVAL` decision recorded in an event, but no `ApprovalItem` is
+ever queued, so the `/approvals` endpoint the dashboard polls will never show it, and the
+human owner has no way to unblock it. Given the product's stated purpose — "the CEO must
+request approval before financial, privacy sensitive, legal, destructive, or irreversible
+actions" — this is the single biggest gap between the README's promise and the code.
 
-## 16. Known Issues
-- Broken unit tests due to capability enum refactoring.
-- WebSocket polling aggressively throws `WinError 10061` tracebacks if the CEO API server goes offline.
-- Sub-optimal capability resolution parsing in the Worker (relies on raw JSON parsing which can occasionally hallucinate).
+## 7. Event Flow
 
-## 17. Technical Debt
-- Mixing of `MockAIPort` / `MockToolPort` into actual API endpoints for demonstrations instead of utilizing a clean DI container.
-- Persistence relies on arbitrary file writes; needs ACID compliance.
+`EventDispatcher` is a straightforward pub/sub (`subscribe(type, handler)` /
+`dispatch(event)`), matched on exact `type(event)` plus a wildcard `Event` subscription used
+by `EventStreamer`. Two independent sync subscribers exist: `FileAuditLog.log_event` (writes
+one JSON line per event to `logs/audit.log`) and `EventStreamer._handle_event` (pushes onto
+an `asyncio.Queue` for WebSocket broadcast).
 
-## 18. Roadmap
-1. Fix broken unit tests (Capability Enum alignment).
-2. Upgrade persistence layer (SQLite/PostgreSQL).
-3. Expand Governance to cover DB operations and API requests.
-4. Finalize v1.0 Release.
+⚠ `EventStreamer._handle_event` calls `asyncio.Queue.put_nowait()` from whatever thread
+`dispatch()` runs on. Because `ReasoningLoop.execute_goal` runs inside FastAPI
+`BackgroundTasks.add_task(sync_fn)`, which Starlette executes in a worker thread (not the
+event loop thread), this is a cross-thread call into an `asyncio.Queue`, which is documented
+as not thread-safe. It works today because CPython's GIL and the queue's simple internals
+make corruption unlikely at low volume, but it's a latent race — see P1-5.
 
-## 19. TODOs
-- Patch Pytest suite to use `ToolCapability.*`.
-- Refactor `ceo_api.py` to accept configured providers via dependency injection rather than hardcoding them.
-- Strip out unused domain stubs.
+## 8. Persistence Flow (⚠ session recovery is fake)
 
-## 20. Overall Readiness Assessment
-**READY FOR RELEASE CANDIDATE.** 
-The architecture proves extremely resilient. The core objective—a long-running reasoning loop that handles failure gracefully via events rather than crashing—has been achieved. The latest fix ensuring the Executive makes derived decisions based on actual `StepStatus` completes the loop securely.
+`FileSessionRepository.save()` writes `{id, state, memory}` to `sessions/<id>.json` on every
+transition — this part works. `FileSessionRepository.load()`, however, is a stub:
 
----
+```python
+def load(self, session_id: str) -> ExecutiveSession:
+    if not path.exists(): raise FileNotFoundError(...)
+    # Minimal loading for demonstration
+    return ExecutiveSession(id=session_id)
+```
 
-### Codebase Anomalies
+It checks the file exists and then **discards its contents**, returning a fresh session with
+none of the saved state, memory, plan, or step history. "Session Recovery" — explicitly
+called out in the reliability checklist — does not currently function. No code path in the
+API currently calls `load()` at all (goals always start a brand-new `ExecutiveSession`), so
+this has not yet caused an observed failure, but it means the persistence layer cannot
+actually be used for its stated purpose if/when recovery is wired up.
 
-#### Dead / Duplicate Code
-- `src/enterprise_os/domain/operations/tools.py`: Contains empty placeholder interfaces (`FilesystemTool`, `TerminalTool`, `BrowserTool` with `pass`). This is duplicate conceptual dead code, as the actual implementation lives in `providers/tools/`.
+## 9. Worker Flow
 
-#### Unfinished Features / Placeholders
-- `src/enterprise_os/application/ports/operations.py`, `research_provider.py`, `knowledge.py` contain `pass` stubs indicating interfaces that haven't been fully fleshed out with methods yet.
+`WorkerLoop.execute_work_item()`: prompts `AIPort` with `Capability.TOOL_SELECTION`, expects
+strict JSON `{"capability": "ENUM_NAME", "arguments": {...}}`, resolves it via
+`ToolCapability.from_string()`, checks membership in `work_item.allowed_tools`, then calls
+`tool_port.execute_tool()`. This is consistent with how `LiveAIPort` in `ceo_api.py`
+formats its canned TOOL_SELECTION responses (`{"capability": "SHELL_EXECUTE", ...}`) and how
+`ReasoningLoop._execute_step` builds `WorkItem.allowed_tools` as `ToolCapability` enum
+members. **The 6 failing tests use the pre-migration string convention** (`"tool_name"` key,
+lowercase `"good_tool"` strings) and are the actual bug — not the production code.
 
-#### Mocked Components
-- `MockAIPort` and `MockToolPort` inside `interfaces/api/ceo_api.py` are used heavily to bypass Ollama for rapid testing.
-- `src/enterprise_os/infrastructure/dummy_provider.py`: A testing artifact left in the main infrastructure package.
+## 10. Module Status
 
-#### Experimental Code / Not Referenced
-- `src/enterprise_os/infrastructure/config/file_document_loader.py`: A basic JSON configuration file loader that doesn't appear widely adopted across the core platform.
+### ✔ Complete / working (evidence: passing tests + consistent call sites)
+- `runtime/` core (`ExecutiveSession`, `ExecutiveState`, `Plan`, `Step`, `Decision`, `events.py`) — 100% covered
+- `providers/tools/registry.py`, `router.py`, `capability.py`, `request.py`, `response.py`
+- `providers/tools/implementations/{filesystem,shell,python,git,browser}_provider.py`
+- `governance/policy_engine.py`, `WorkspaceConfinementPolicy`, `CommandRestrictionPolicy` (logic correct; policy *content* is weak, see P2-1)
+- `governance/approval_engine.py` (correct in isolation; never invoked — see P0-2)
+- `worker/worker_loop.py`, `worker_models.py`, `worker_session.py`
+- `interfaces/api/websocket.py`, static dashboard (`interfaces/web/`)
+- The 8 domain "milestone" packages (strategy/ops/org/research/knowledge/optimisation/growth/evolution) — each has an orchestrator + dedicated test file, all passing
 
-#### Dependency Graph
-`Interfaces (API/UI)` → `Runtime (Reasoning/Worker)` → `Governance (Approval)` → `Providers (Tools/AI)` → `Infrastructure (Persistence/Logs)`
+### ⚠ Incomplete
+- `LiveAIPort.request_capability` — hardcoded canned responses, never calls `AIRouter`/`OllamaProvider` (§5)
+- `FileSessionRepository.load()` — discards saved state (§8, P0-3)
+- `application/ports/knowledge.py`, `operations.py`, `research_provider.py` — `ABC` ports with only docstring-stub methods, several implemented by nothing but `DummyResearchProvider`
+- `ReasoningLoop._research()` — no-op `pass`, `RESEARCHING` state transition does nothing
+- `_reflect_on_step()` — trivial `status == COMPLETED` check, not real self-evaluation despite ROADMAP calling this "Self-Evaluation Loop" ✅ done
+
+### ✗ Broken (currently failing)
+- Governance approval loop end-to-end (P0-2)
+- 6 unit tests, all one root cause (P0-1)
+
+## 11. Technical Debt / Dead Code / Duplicates
+
+- `src/enterprise_os/domain/operations/tools.py` — `FilesystemTool`/`TerminalTool`/`BrowserTool`/
+  `GitTool`/`PythonTool`/`APITool` are all empty `pass` subclasses of `ToolInterface`,
+  conceptually duplicating `providers/tools/implementations/*`. Nothing imports them
+  (verified: no references outside this file). Dead code — candidate for deletion.
+- `src/enterprise_os/infrastructure/dummy_provider.py` — `DummyResearchProvider`, a test
+  fixture living in `infrastructure/` rather than `tests/`. Only used by
+  `application/services`/tests for the research orchestrator; should move to `tests/fixtures/`
+  or be clearly namespaced as a fixture, not production infra.
+- `src/enterprise_os/infrastructure/config/file_document_loader.py` — a generic JSON
+  loader with reasonable path-escape protection, but grep shows no importers anywhere in
+  `src/`. Either dead code or an intended-but-unwired config abstraction.
+- `MockAIPort`/`MockToolPort` defined inline in several test files with slightly different
+  signatures each time (`tests/unit/runtime/test_runtime.py`,
+  `tests/unit/worker/test_worker_runtime.py`) instead of a single shared fixture in
+  `tests/support.py` — duplicated test scaffolding, not production risk, but worth
+  consolidating (P5).
+- `time.sleep(0.5)` hardcoded in the reasoning loop's hot path (`reasoning_loop.py:42`) —
+  no config flag to disable it; slows every goal execution and every test that exercises the
+  loop by 0.5s per step for no functional reason.
+
+## 12. Mock / Placeholder Implementations
+
+- `LiveAIPort` in `ceo_api.py` — scripted/canned, not a real LLM call path (§5)
+- `DummyResearchProvider` — explicit dummy, correctly named, low risk
+- `FileSessionRepository.load()` — silently returns a fake session instead of the real one (§8)
+- `application/ports/{knowledge,operations,research_provider}.py` — interface-only, several
+  methods have no concrete non-dummy implementation anywhere in the tree
+
+## 13. Missing Tests
+
+- No test currently exercises `ApprovalEngine` end-to-end from a `SEEK_APPROVAL` decision
+  (because that wiring doesn't exist — P0-2)
+- No test for `FileSessionRepository.load()` round-tripping actual saved state (it would fail immediately, which is exactly why this gap matters)
+- No integration test hitting the FastAPI endpoints (`/ceo/goal`, `/approvals`, `/health`,
+  the websocket) via `TestClient` — `tests/integration/` covers `ceo_runtime` (the domain
+  loop) and the file loggers, but not the HTTP/WS surface
+- No test for `CommandRestrictionPolicy` bypass strings (e.g. `"rm  -rf"`, `"/bin/sudo"`,
+  destructive commands outside the 5-item blocklist) — see P2-1
+- `worker_loop.py` coverage is 69% (lowest in the runtime/worker layer); the exception
+  branches (JSON parse failure, tool execution exception) are untested
+
+## 14. Missing Documentation
+
+None of the following exist yet: `ARCHITECTURE.md`, `API.md`, `PROVIDERS.md`,
+`GOVERNANCE.md`, `RUNTIME.md`, `WORKERS.md`, `SECURITY.md`, `DEPLOYMENT.md`,
+`CONTRIBUTING.md`, `RELEASE_NOTES.md`. `docs/` currently contains only internal
+milestone/planning notes (`MILESTONE_01..10.md`, `ROADMAP.md`,
+`CODEX_ENGINEERING_PROTOCOL.md`, `PHASE_01_AI_PLATFORM.md`), which read as build-process
+logs rather than user- or contributor-facing docs.
+
+## 15. Potential Bugs (beyond the 6 failing tests)
+
+1. **P0-2** — Approval flow disconnected (§6).
+2. **P0-3** — `FileSessionRepository.load()` discards state (§8).
+3. **P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5); the "Live"
+   naming is misleading — it's fully scripted.
+4. **P1-5** — Cross-thread `asyncio.Queue.put_nowait()` call from a background-task thread
+   (§7) — latent race, not yet observed to fail but architecturally unsound.
+5. `_create_plan()`'s JSON-parse fallback silently produces a single placeholder step
+   instead of surfacing the parse failure as an error/approval trigger — a malformed AI
+   response degrades to a fake plan rather than failing loud.
+
+## 16. Security Concerns
+
+1. **P2-1 (highest)** — `CommandRestrictionPolicy` is a 5-string **blocklist**
+   (`rm -rf`, `sudo`, `mkfs`, `chown`, `chmod`) checked via plain substring match against
+   arbitrary shell input that is then run with `subprocess.run(command, shell=True, ...)`.
+   Trivially bypassed (whitespace variants, absolute paths, `curl … | sh`, `python -c
+   "import os; os.remove(...)"`, any command not on the list). This is the single largest
+   security gap relative to the checklist's "command allowlists" / "arbitrary shell
+   execution" items.
+2. `WorkspaceConfinementPolicy` and `FilesystemProvider._resolve_safe_path()` both do
+   `str(target).startswith(str(root))` for containment checks — this is a known-fragile
+   pattern (a sibling directory `workspace-evil/` passes a `startswith("workspace")` check
+   against root `workspace`). In this codebase root and target are both `Path.resolve()`d
+   first and the check is against the *root itself* not a sibling, so it is not currently
+   exploitable, but it should use `Path.is_relative_to()` (Python 3.9+) for correctness and
+   auditability rather than string prefix matching.
+3. No symlink handling: `_resolve_safe_path` calls `.resolve()` which follows symlinks, so a
+   symlink planted inside the workspace pointing outside it would resolve outside the root
+   and then correctly be rejected by the prefix check — this one is actually fine, confirmed
+   by tracing the resolve() + startswith() order.
+4. No authentication/authorization on any FastAPI endpoint — `/ceo/goal`, `/approvals`,
+   `/approvals/{id}` (approve/reject!) are all unauthenticated. Acceptable for a local
+   single-owner MVP, but worth flagging explicitly as a pre-multi-tenant gap rather than a
+   silent assumption.
+5. No input validation on `GoalRequest.description` (free text, unbounded, flows directly
+   into an AI prompt) — low risk today since `LiveAIPort` is canned (P1-4), but a real prompt
+   injection surface once live inference is wired up.
+
+## 17. Performance Notes (measured/observed, not yet load-tested)
+
+- `time.sleep(0.5)` per reasoning-loop iteration (§11) is the most obvious avoidable cost —
+  a 3-step goal spends 1.5s doing nothing.
+- `ToolRouter.route()` and `ToolRegistry.auto_discover()` are linear scans over small
+  in-memory lists — not a bottleneck at current scale, no action needed.
+- No caching observed between AI capability requests, no batching — not measured under load
+  since there's no load-testing harness yet (see V1_RELEASE_PLAN P3 items).
+
+## 18. Dependency Graph
+
+```
+Interfaces (FastAPI/WebSocket)
+        │
+        ▼
+Runtime (ReasoningLoop) ──► Worker (WorkerLoop)
+        │                         │
+        ▼                         ▼
+Governance (PolicyEngine,   Providers (ToolRouter → Filesystem/Shell/Python/Git/Browser)
+ApprovalEngine — NOT        Providers (AIRouter → OllamaProvider, currently bypassed by
+connected to Runtime)       the canned LiveAIPort)
+        │
+        ▼
+Infrastructure (FileSessionRepository, FileAuditLog, EventDispatcher)
+```
+
+## 19. Overall Readiness Assessment
+
+**NOT YET READY for v1.0 (currently RC-minus).** The architecture is sound and most of the
+Executive/Worker/Tool loop genuinely works, matching the project's own ROADMAP claim that
+the "Executive Kernel" is feature-complete for its *scaffolding*. But three P0-severity gaps
+mean the product does not yet deliver on its own core promise (governed, approvable
+autonomous execution): the approval loop is disconnected, session recovery is a stub, and
+6 tests are red on a clean checkout. See `V1_RELEASE_PLAN.md` for the prioritized path to
+green.

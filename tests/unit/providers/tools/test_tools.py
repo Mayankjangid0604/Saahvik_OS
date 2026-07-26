@@ -4,15 +4,17 @@ from enterprise_os.providers.tools.router import ToolRouter
 from enterprise_os.providers.tools.request import ToolRequest
 from enterprise_os.providers.tools.response import ToolResponse
 from enterprise_os.providers.tools.exceptions import ToolNotFoundError
+from enterprise_os.providers.tools.capability import ToolCapability
 
 class MockFilesystemProvider:
     @property
     def name(self) -> str:
         return "filesystem"
-        
-    def can_handle(self, tool_name: str) -> bool:
-        return tool_name in ["read_file", "write_file"]
-        
+
+    @property
+    def capabilities(self) -> list[ToolCapability]:
+        return [ToolCapability.FILE_READ, ToolCapability.FILE_WRITE]
+
     def execute(self, request: ToolRequest) -> ToolResponse:
         return ToolResponse(success=True, result="content", execution_time=0.1)
 
@@ -20,10 +22,11 @@ class MockShellProvider:
     @property
     def name(self) -> str:
         return "shell"
-        
-    def can_handle(self, tool_name: str) -> bool:
-        return tool_name == "execute_command"
-        
+
+    @property
+    def capabilities(self) -> list[ToolCapability]:
+        return [ToolCapability.SHELL_EXECUTE]
+
     def execute(self, request: ToolRequest) -> ToolResponse:
         return ToolResponse(success=True, result="output", execution_time=0.5)
 
@@ -44,14 +47,14 @@ def test_tool_router():
     registry = ToolRegistry()
     registry.register_provider(MockFilesystemProvider())
     registry.register_provider(MockShellProvider())
-    
+
     router = ToolRouter(registry)
-    
-    provider1 = router.route("read_file")
+
+    provider1 = router.route(ToolCapability.FILE_READ)
     assert provider1.name == "filesystem"
-    
-    provider2 = router.route("execute_command")
+
+    provider2 = router.route(ToolCapability.SHELL_EXECUTE)
     assert provider2.name == "shell"
-    
+
     with pytest.raises(ToolNotFoundError):
-        router.route("send_email")
+        router.route(ToolCapability.GIT_EXECUTE)

@@ -14,7 +14,7 @@ class MockAIPort:
         if "PLANNING" in str(capability):
             text = '{"steps": [{"id": "1", "description": "Step 1"}]}'
         elif "TOOL_SELECTION" in str(capability):
-            text = '{"tool_name": "python", "arguments": {}}'
+            text = '{"capability": "PYTHON_EXECUTE", "arguments": {}}'
         else:
             text = "mock"
         return AIResponse(text=text, provider="mock", model="mock", capability=capability, finish_reason="stop", duration=0.1, prompt_tokens=1, completion_tokens=1, total_tokens=2)
@@ -47,4 +47,4 @@ def test_reasoning_loop_execution():
     decision = loop.execute_goal(session, goal)
     
     assert decision.outcome == DecisionOutcome.PROCEED
-    assert session.context.state == ExecutiveState.DECIDING
+    assert session.context.state == ExecutiveState.EVALUATING
