@@ -1,4 +1,3 @@
-import os
 import time
 from pathlib import Path
 from enterprise_os.providers.tools.request import ToolRequest
@@ -23,6 +22,7 @@ class FilesystemProvider(ToolProvider):
         start_time = time.time()
         
         try:
+            result: str | list[str]
             if request.tool_name == "FILE_READ":
                 result = self._read_file(request.arguments.get("path", ""))
             elif request.tool_name == "FILE_WRITE":
@@ -47,7 +47,7 @@ class FilesystemProvider(ToolProvider):
 
     def _resolve_safe_path(self, relative_path: str) -> Path:
         target_path = (self.workspace_root / relative_path).resolve()
-        if not str(target_path).startswith(str(self.workspace_root)):
+        if not target_path.is_relative_to(self.workspace_root):
             raise PermissionError("Access denied: path is outside the workspace root.")
         return target_path
 

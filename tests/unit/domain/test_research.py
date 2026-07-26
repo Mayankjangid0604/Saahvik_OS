@@ -3,8 +3,7 @@ from datetime import datetime, timezone
 
 from enterprise_os.domain.research import (
     Evidence, Fact, FactStatus, Finding, GapStatus, KnowledgeGap,
-    ResearchPlan, ResearchQuestion, ExecutiveRecommendation, Source,
-    Hypothesis, HypothesisStatus
+    ExecutiveRecommendation, Hypothesis, HypothesisStatus
 )
 
 def test_knowledge_gap_is_valid():

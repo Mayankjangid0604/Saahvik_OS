@@ -11,17 +11,26 @@ from enterprise_os.runtime.persistence import SessionRepository
 from enterprise_os.application.ports.ai_port import AIPort
 from enterprise_os.application.ports.tool_port import ToolPort
 from enterprise_os.providers.ai.capability import Capability
+from enterprise_os.governance.approval_engine import ApprovalEngine
 
 from enterprise_os.worker.worker_models import WorkItem
 from enterprise_os.worker.worker_session import WorkerSession
 from enterprise_os.worker.worker_loop import WorkerLoop
 
 class ReasoningLoop:
-    def __init__(self, ai_port: AIPort, tool_port: ToolPort, dispatcher: EventDispatcher, repository: SessionRepository) -> None:
+    def __init__(
+        self,
+        ai_port: AIPort,
+        tool_port: ToolPort,
+        dispatcher: EventDispatcher,
+        repository: SessionRepository,
+        approval_engine: Optional[ApprovalEngine] = None,
+    ) -> None:
         self.ai = ai_port
         self.tools = tool_port
         self.dispatcher = dispatcher
         self.repository = repository
+        self.approval_engine = approval_engine
         self.worker_loop = WorkerLoop(ai_port, tool_port)
 
     def _transition(self, session: ExecutiveSession, new_state: ExecutiveState) -> None:
@@ -36,10 +45,9 @@ class ReasoningLoop:
         
         self._transition(session, ExecutiveState.PLANNING)
         plan = self._create_plan(goal, session)
-        
+        session.context.plan = plan
+
         while True:
-            import time
-            time.sleep(0.5)
             step = plan.get_next_step()
             if not step:
                 break
@@ -62,9 +70,15 @@ class ReasoningLoop:
         failed_steps = [s for s in plan.steps if s.status == StepStatus.FAILED]
         if failed_steps:
             decision = Decision(outcome=DecisionOutcome.SEEK_APPROVAL, justification=f"Execution paused: {len(failed_steps)} step(s) failed.")
+            if self.approval_engine is not None:
+                approval_id = self.approval_engine.request_approval(
+                    justification=decision.justification,
+                    context=f"goal={goal.id} session={session.id} failed_steps={[s.id for s in failed_steps]}",
+                )
+                session.context.memory["pending_approval_id"] = approval_id
         else:
             decision = Decision(outcome=DecisionOutcome.PROCEED, justification="All steps completed successfully.")
-            
+
         self.dispatcher.dispatch(DecisionMade(session_id=session.id, outcome=decision.outcome.name, justification=decision.justification))
         self.repository.save(session)
         
@@ -101,17 +115,31 @@ Respond STRICTLY with this JSON format:
             data = json.loads(raw.strip())
             steps = [Step(id=str(s["id"]), description=s["description"]) for s in data.get("steps", [])]
             if not steps:
-                steps = [Step(id="1", description="Fallback step due to empty JSON")]
+                raise ValueError("Planning response contained no steps.")
         except Exception as e:
-            steps = [Step(id="1", description=f"Fallback Step due to parsing error: {e}")]
-            
+            # Don't silently substitute a fake step that then actually executes --
+            # mark it failed up front so _execute_step short-circuits and the goal
+            # correctly ends in SEEK_APPROVAL instead of masking the parse failure.
+            steps = [Step(
+                id="planning",
+                description="Plan generation failed.",
+                status=StepStatus.FAILED,
+                result=f"Failed to parse planning response: {e}",
+            )]
+
         plan = Plan(id=f"plan-{goal.id}", goal_id=goal.id, steps=steps)
         self.dispatcher.dispatch(PlanGenerated(session_id=session.id, plan_id=plan.id, steps_count=len(plan.steps)))
         return plan
-        
+
     def _execute_step(self, session: ExecutiveSession, step: Step) -> None:
+        if step.status == StepStatus.FAILED:
+            # Already failed before execution (e.g. plan generation couldn't be
+            # parsed) -- report it and skip, rather than wasting a tool invocation.
+            self.dispatcher.dispatch(StepFailed(session_id=session.id, step_id=step.id, error=step.result or "Step failed before execution."))
+            return
+
         step.status = StepStatus.IN_PROGRESS
-        
+
         worker_session = WorkerSession(objective=step.description)
         from enterprise_os.providers.tools.capability import ToolCapability
         work_item = WorkItem(

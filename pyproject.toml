@@ -8,5 +8,14 @@ dependencies = [
     "uvicorn",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+]
+demo = [
+    "requests",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]

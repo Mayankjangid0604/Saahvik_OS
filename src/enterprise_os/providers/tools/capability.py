@@ -15,5 +15,5 @@ class ToolCapability(Enum):
     def from_string(cls, value: str) -> "ToolCapability":
         try:
             return cls[value.upper()]
-        except KeyError:
-            raise ValueError(f"Unknown capability: {value}")
+        except KeyError as e:
+            raise ValueError(f"Unknown capability: {value}") from e

@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from enterprise_os.domain.research.evidence import Evidence
-from enterprise_os.domain.optimisation.proposal import ImprovementProposal
 
 @dataclass(frozen=True)
 class GrowthOpportunity:

@@ -1,5 +1,5 @@
 from time import perf_counter
-from typing import Set
+from typing import Any, Set
 
 from enterprise_os.providers.ai.provider import AIProvider
 from enterprise_os.providers.ai.request import AIRequest
@@ -62,8 +62,8 @@ class OllamaProvider(AIProvider, ModelDiscovery):
             ))
         return models
 
-    def _convert_options(self, request: AIRequest) -> dict:
-        opts = {}
+    def _convert_options(self, request: AIRequest) -> dict[str, Any]:
+        opts: dict[str, Any] = {}
         if request.temperature is not None:
             opts["temperature"] = request.temperature
         if request.top_p is not None:
@@ -96,8 +96,8 @@ class OllamaProvider(AIProvider, ModelDiscovery):
                 resp = self._client.generate(model_name, request.prompt, request.system_prompt, options)
                 text = resp.get("response", "")
         except Exception as e:
-            raise ProviderUnavailableError(f"Ollama request failed: {e}")
-            
+            raise ProviderUnavailableError(f"Ollama request failed: {e}") from e
+
         duration = perf_counter() - start_time
         
         return AIResponse(
@@ -126,12 +126,14 @@ class OllamaProvider(AIProvider, ModelDiscovery):
         
     def embed(self, request: AIRequest) -> AIResponse:
         model_name = request.metadata.get("model_name")
+        if not model_name:
+            raise ValueError("model_name must be provided in metadata for OllamaProvider")
         start_time = perf_counter()
         try:
             resp = self._client.embeddings(model_name, request.prompt)
         except Exception as e:
-            raise ProviderUnavailableError(f"Ollama embeddings failed: {e}")
-            
+            raise ProviderUnavailableError(f"Ollama embeddings failed: {e}") from e
+
         duration = perf_counter() - start_time
         return AIResponse(
             text="[EMBEDDINGS_RETURNED_IN_METADATA]",

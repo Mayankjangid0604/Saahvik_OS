@@ -1,8 +1,6 @@
-import pytest
 
 from enterprise_os.providers.ai.registry import ModelRegistry
 from enterprise_os.providers.ai.model import AIModel
-from enterprise_os.providers.ai.provider import AIProvider
 
 class DummyProvider:
     @property

@@ -1,8 +1,11 @@
 import importlib
 import inspect
+import logging
 import pkgutil
 from typing import Optional
 from enterprise_os.providers.tools.provider import ToolProvider
+
+logger = logging.getLogger(__name__)
 
 class ToolRegistry:
     def __init__(self) -> None:
@@ -21,7 +24,6 @@ class ToolRegistry:
         self._providers.clear()
 
     def auto_discover(self, module_name: str, **kwargs) -> None:
-        import sys
         module = importlib.import_module(module_name)
         
         if not hasattr(module, '__path__'):
@@ -44,8 +46,15 @@ class ToolRegistry:
                             elif param.default == inspect.Parameter.empty and param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                                 break
                         else:
+                            # attr_val is discovered dynamically via reflection (any class
+                            # in the target package exposing name/capabilities/execute), so
+                            # mypy cannot statically verify it satisfies ToolProvider here --
+                            # that's checked by the hasattr() filter above at runtime instead.
                             provider_instance = attr_val(**init_kwargs)
-                            self.register_provider(provider_instance)
-                    except Exception as e:
-                        pass
+                            self.register_provider(provider_instance)  # type: ignore[arg-type]
+                    except Exception:
+                        logger.warning(
+                            "Failed to auto-discover tool provider %s.%s; skipping it.",
+                            full_module_name, attr_name, exc_info=True,
+                        )
 

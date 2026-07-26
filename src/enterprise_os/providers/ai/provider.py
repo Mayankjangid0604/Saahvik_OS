@@ -1,4 +1,4 @@
-from typing import Protocol, Any
+from typing import Protocol
 from enterprise_os.providers.ai.request import AIRequest
 from enterprise_os.providers.ai.response import AIResponse
 

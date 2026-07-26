@@ -1,5 +1,5 @@
 from enterprise_os.domain.strategy.goal import StrategicGoal
-from enterprise_os.domain.organisation.capability import Capability, CapabilityAnalysis
+from enterprise_os.domain.organisation.capability import Capability
 from enterprise_os.domain.organisation.function import BusinessFunction
 from enterprise_os.domain.organisation.blueprint import DepartmentBlueprint, RoleBlueprint, OrganisationBlueprint
 from enterprise_os.domain.organisation.review import OrganisationReview
@@ -9,7 +9,6 @@ from enterprise_os.domain.organisation.recommendation import OrganisationalRecom
 class OrganisationalOrchestrator:
     def execute_cycle(self, goals: tuple[StrategicGoal, ...]) -> OrganisationalRecommendation:
         capabilities = self._derive_capabilities(goals)
-        analysis = self._analyze_capabilities(capabilities)
         functions = self._group_functions(capabilities)
         departments = self._propose_departments(capabilities, functions)
         roles = self._propose_roles(capabilities)
@@ -49,16 +48,6 @@ class OrganisationalOrchestrator:
                 maturity="Low",
                 confidence="High"
             ),
-        )
-
-    def _analyze_capabilities(self, capabilities: tuple[Capability, ...]) -> CapabilityAnalysis:
-        return CapabilityAnalysis(
-            missing_capabilities=capabilities,
-            existing_capabilities=(),
-            overlapping_capabilities=(),
-            critical_capabilities=capabilities,
-            optional_capabilities=(),
-            reasoning="Current state assessment"
         )
 
     def _group_functions(self, capabilities: tuple[Capability, ...]) -> tuple[BusinessFunction, ...]:

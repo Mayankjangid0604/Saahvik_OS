@@ -1,7 +1,6 @@
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enterprise_os.runtime.events import EventDispatcher, Event
-from typing import Optional
 
 @dataclass(frozen=True, kw_only=True)
 class ApprovalRequested(Event):

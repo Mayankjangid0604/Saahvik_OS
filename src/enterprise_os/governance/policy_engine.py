@@ -1,4 +1,4 @@
-from typing import Protocol, Any
+from typing import Protocol
 from enterprise_os.providers.tools.request import ToolRequest
 
 class Policy(Protocol):
