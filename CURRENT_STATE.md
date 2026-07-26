@@ -135,22 +135,22 @@ Every step of the `while True` loop calls `time.sleep(0.5)` unconditionally
   `ToolRouter.route(capability)` linear-scans providers for one whose `capabilities` list
   contains the requested enum member.
 
-## 6. Governance Flow (⚠ broken — see P0-2)
+## 6. Governance Flow (✅ fixed — was P0-2)
 
 `PolicyEnforcedToolPort.execute_tool()` builds a `ToolRequest`, runs it through
 `PolicyEngine.evaluate()` (currently two policies: `WorkspaceConfinementPolicy`,
 `CommandRestrictionPolicy`), and only calls the underlying port if approved. This part
 works and is tested.
 
-**What does not exist:** any connection from `ReasoningLoop`'s `DecisionOutcome.SEEK_APPROVAL`
-to `ApprovalEngine.request_approval()`. `ApprovalEngine` is instantiated in `ceo_api.py` and
-exposed via `GET/POST /approvals`, but nothing ever calls `request_approval()` — grepping the
-entire `src/` tree confirms zero call sites outside the engine's own definition. A goal that
-fails a step gets a `SEEK_APPROVAL` decision recorded in an event, but no `ApprovalItem` is
-ever queued, so the `/approvals` endpoint the dashboard polls will never show it, and the
-human owner has no way to unblock it. Given the product's stated purpose — "the CEO must
-request approval before financial, privacy sensitive, legal, destructive, or irreversible
-actions" — this is the single biggest gap between the README's promise and the code.
+**Previously missing, now fixed:** `ReasoningLoop.execute_goal()` now calls
+`ApprovalEngine.request_approval(justification, context)` when it computes a
+`SEEK_APPROVAL` decision, and stores the resulting `approval_id` in
+`session.context.memory["pending_approval_id"]`. `ceo_api.py` passes its real
+`approval_engine` instance into `ReasoningLoop`, so a failed step now produces a real,
+resolvable entry in `GET /approvals` that the dashboard can act on via
+`POST /approvals/{id}`. `ApprovalRequested`/`ApprovalGranted`/`ApprovalRejected` are also
+now bound to the audit log. Covered by
+`test_reasoning_loop_seeks_approval_on_step_failure`.
 
 ## 7. Event Flow
 
@@ -204,7 +204,7 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 - `providers/tools/registry.py`, `router.py`, `capability.py`, `request.py`, `response.py`
 - `providers/tools/implementations/{filesystem,shell,python,git,browser}_provider.py`
 - `governance/policy_engine.py`, `WorkspaceConfinementPolicy`, `CommandRestrictionPolicy` (logic correct; policy *content* is weak, see P2-1)
-- `governance/approval_engine.py` (correct in isolation; never invoked — see P0-2)
+- `governance/approval_engine.py` (now wired into `ReasoningLoop` — see §6, was P0-2)
 - `worker/worker_loop.py`, `worker_models.py`, `worker_session.py`
 - `interfaces/api/websocket.py`, static dashboard (`interfaces/web/`)
 - The 8 domain "milestone" packages (strategy/ops/org/research/knowledge/optimisation/growth/evolution) — each has an orchestrator + dedicated test file, all passing
@@ -274,7 +274,7 @@ logs rather than user- or contributor-facing docs.
 
 ## 15. Potential Bugs (beyond the 6 failing tests)
 
-1. **P0-2** — Approval flow disconnected (§6).
+1. ~~**P0-2** — Approval flow disconnected (§6)~~ — fixed this session.
 2. **P0-3** — `FileSessionRepository.load()` discards state (§8).
 3. **P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5); the "Live"
    naming is misleading — it's fully scripted.

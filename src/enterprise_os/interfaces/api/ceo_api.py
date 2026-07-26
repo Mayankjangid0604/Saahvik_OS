@@ -98,8 +98,13 @@ dispatcher = EventDispatcher()
 session_repo = FileSessionRepository()
 audit_log = FileAuditLog()
 from enterprise_os.runtime.events import GoalCreated, PlanGenerated, StepCompleted, StepFailed, StateTransitioned, DecisionMade, EvaluationCompleted, SessionFinished
-audit_log.bind_to(dispatcher, [GoalCreated, PlanGenerated, StepCompleted, StepFailed, StateTransitioned, DecisionMade, EvaluationCompleted, SessionFinished])
+from enterprise_os.governance.approval_engine import ApprovalRequested, ApprovalGranted, ApprovalRejected
 approval_engine = ApprovalEngine(dispatcher)
+audit_log.bind_to(dispatcher, [
+    GoalCreated, PlanGenerated, StepCompleted, StepFailed, StateTransitioned,
+    DecisionMade, EvaluationCompleted, SessionFinished,
+    ApprovalRequested, ApprovalGranted, ApprovalRejected,
+])
 
 event_streamer = EventStreamer(dispatcher)
 
@@ -146,7 +151,8 @@ reasoning_loop = ReasoningLoop(
     ai_port=live_ai_port,
     tool_port=policy_port,
     dispatcher=dispatcher,
-    repository=session_repo
+    repository=session_repo,
+    approval_engine=approval_engine,
 )
 
 class GoalRequest(BaseModel):

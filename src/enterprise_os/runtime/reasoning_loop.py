@@ -11,17 +11,26 @@ from enterprise_os.runtime.persistence import SessionRepository
 from enterprise_os.application.ports.ai_port import AIPort
 from enterprise_os.application.ports.tool_port import ToolPort
 from enterprise_os.providers.ai.capability import Capability
+from enterprise_os.governance.approval_engine import ApprovalEngine
 
 from enterprise_os.worker.worker_models import WorkItem
 from enterprise_os.worker.worker_session import WorkerSession
 from enterprise_os.worker.worker_loop import WorkerLoop
 
 class ReasoningLoop:
-    def __init__(self, ai_port: AIPort, tool_port: ToolPort, dispatcher: EventDispatcher, repository: SessionRepository) -> None:
+    def __init__(
+        self,
+        ai_port: AIPort,
+        tool_port: ToolPort,
+        dispatcher: EventDispatcher,
+        repository: SessionRepository,
+        approval_engine: Optional[ApprovalEngine] = None,
+    ) -> None:
         self.ai = ai_port
         self.tools = tool_port
         self.dispatcher = dispatcher
         self.repository = repository
+        self.approval_engine = approval_engine
         self.worker_loop = WorkerLoop(ai_port, tool_port)
 
     def _transition(self, session: ExecutiveSession, new_state: ExecutiveState) -> None:
@@ -62,9 +71,15 @@ class ReasoningLoop:
         failed_steps = [s for s in plan.steps if s.status == StepStatus.FAILED]
         if failed_steps:
             decision = Decision(outcome=DecisionOutcome.SEEK_APPROVAL, justification=f"Execution paused: {len(failed_steps)} step(s) failed.")
+            if self.approval_engine is not None:
+                approval_id = self.approval_engine.request_approval(
+                    justification=decision.justification,
+                    context=f"goal={goal.id} session={session.id} failed_steps={[s.id for s in failed_steps]}",
+                )
+                session.context.memory["pending_approval_id"] = approval_id
         else:
             decision = Decision(outcome=DecisionOutcome.PROCEED, justification="All steps completed successfully.")
-            
+
         self.dispatcher.dispatch(DecisionMade(session_id=session.id, outcome=decision.outcome.name, justification=decision.justification))
         self.repository.save(session)
         

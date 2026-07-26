@@ -19,17 +19,23 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   until this is fixed. Blocks everything else.
 - **Effort:** S (~30 min). No production code changes — this is a test-only fix.
 
-### P0-2 — Wire `SEEK_APPROVAL` decisions to `ApprovalEngine`
+### P0-2 — Wire `SEEK_APPROVAL` decisions to `ApprovalEngine` — ✅ FIXED
 - **Reason:** `ReasoningLoop` computes `DecisionOutcome.SEEK_APPROVAL` but never calls
   `ApprovalEngine.request_approval()`. The engine, the `/approvals` REST endpoints, and the
   dashboard polling all exist and work in isolation but are never invoked in the real flow.
 - **Impact:** The product's core governance promise ("CEO requests approval before risky
   actions") does not function. A stuck goal is invisible to the owner and unrecoverable
   without reading raw event logs.
-- **Effort:** M (~2-3h): call `approval_engine.request_approval(...)` when a decision is
-  `SEEK_APPROVAL`, thread the resulting `approval_id` back into the session/event so the
-  dashboard can show it, add an integration test that drives a failing step through to a
-  visible pending approval and resolves it.
+- **Effort:** M (~2-3h).
+- **Resolution:** `ReasoningLoop` now takes an optional `approval_engine: ApprovalEngine`
+  and calls `request_approval(justification, context)` in the `SEEK_APPROVAL` branch,
+  storing the resulting `approval_id` in `session.context.memory["pending_approval_id"]`.
+  `ceo_api.py` wires the app's real `approval_engine` in, and `ApprovalRequested` /
+  `ApprovalGranted` / `ApprovalRejected` are now bound to the audit log alongside the
+  existing event types. Added
+  `test_reasoning_loop_seeks_approval_on_step_failure` driving a real step failure through
+  to a resolvable pending approval. `approval_engine` defaults to `None` so existing
+  callers/tests that don't pass one are unaffected.
 
 ### P0-3 — Fix `FileSessionRepository.load()` to actually restore state
 - **Reason:** `load()` checks the file exists, then discards its contents and returns a

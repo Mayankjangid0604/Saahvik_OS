@@ -6,6 +6,7 @@ from enterprise_os.runtime.decision import DecisionOutcome
 from enterprise_os.runtime.reasoning_loop import ReasoningLoop
 from enterprise_os.runtime.events import EventDispatcher
 from enterprise_os.runtime.persistence import SessionRepository
+from enterprise_os.governance.approval_engine import ApprovalEngine
 from enterprise_os.providers.ai.response import AIResponse
 from enterprise_os.providers.tools.response import ToolResponse
 
@@ -48,3 +49,28 @@ def test_reasoning_loop_execution():
     
     assert decision.outcome == DecisionOutcome.PROCEED
     assert session.context.state == ExecutiveState.EVALUATING
+
+def test_reasoning_loop_seeks_approval_on_step_failure():
+    class FailingToolSelectionAIPort(MockAIPort):
+        def request_capability(self, capability, prompt, system_prompt="", kwargs=None):
+            if "TOOL_SELECTION" in str(capability):
+                text = '{"capability": "GIT_EXECUTE", "arguments": {}}'  # not in allowed_tools -> step fails
+                return AIResponse(text=text, provider="mock", model="mock", capability=capability, finish_reason="stop", duration=0.1, prompt_tokens=1, completion_tokens=1, total_tokens=2)
+            return super().request_capability(capability, prompt, system_prompt, kwargs)
+
+    ai = FailingToolSelectionAIPort()
+    tools = MockToolPort()
+    dispatcher = EventDispatcher()
+    repo = MockSessionRepo()
+    approval_engine = ApprovalEngine(dispatcher)
+    loop = ReasoningLoop(ai, tools, dispatcher, repo, approval_engine=approval_engine)
+
+    session = ExecutiveSession()
+    goal = Goal("g2", "Do something that fails", "Done")
+
+    decision = loop.execute_goal(session, goal)
+
+    assert decision.outcome == DecisionOutcome.SEEK_APPROVAL
+    pending = approval_engine.get_pending_approvals()
+    assert len(pending) == 1
+    assert session.context.memory["pending_approval_id"] == pending[0].id
