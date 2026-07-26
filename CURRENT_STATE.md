@@ -338,10 +338,17 @@ Infrastructure (FileSessionRepository, FileAuditLog, EventDispatcher)
 
 ## 19. Overall Readiness Assessment
 
-**NOT YET READY for v1.0 (currently RC-minus).** The architecture is sound and most of the
-Executive/Worker/Tool loop genuinely works, matching the project's own ROADMAP claim that
-the "Executive Kernel" is feature-complete for its *scaffolding*. But three P0-severity gaps
-mean the product does not yet deliver on its own core promise (governed, approvable
-autonomous execution): the approval loop is disconnected, session recovery is a stub, and
-6 tests are red on a clean checkout. See `V1_RELEASE_PLAN.md` for the prioritized path to
-green.
+**Status as of this session: all P0 items closed.** The three release-blocking gaps
+identified at audit start are fixed and verified by tests: 6 legacy tests were repaired
+(P0-1), the `SEEK_APPROVAL` decision path is now wired into `ApprovalEngine` (P0-2), and
+`FileSessionRepository.load()` now actually restores saved state (P0-3). Suite: **80
+passed, 1 skipped, 0 failed, 86% coverage** (up from 72/6/1, 85%). The architecture remains
+sound and the Executive/Worker/Tool loop genuinely works end-to-end with a real,
+resolvable governance gate.
+
+**Still NOT READY for a v1.0 tag** — the P1-P5 backlog in `V1_RELEASE_PLAN.md` remains
+open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything today
+runs against scripted responses), the shell command policy is a bypassable blocklist
+rather than an allowlist (P2-1, the sharpest security gap), and none of the 10 user/
+contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist yet (P4-1). See
+`V1_RELEASE_PLAN.md` for the full prioritized path and current status of each item.
