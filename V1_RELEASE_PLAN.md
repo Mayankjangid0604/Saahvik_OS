@@ -54,12 +54,33 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 
 ## P1 — Reliability
 
-### P1-1 — Consolidate duplicated Mock AI/Tool ports into shared test fixtures
-- **Reason:** `MockAIPort`/`MockToolPort` are redefined with slightly different signatures
-  in multiple test files instead of a single fixture in `tests/support.py`.
-- **Impact:** Divergent mocks are exactly how P0-1 happened — a production API change
-  updates one mock but not the others, and failures surface late.
-- **Effort:** S (~1-2h).
+### P1-1 — Consolidate duplicated Mock AI/Tool ports into shared test fixtures — ❌ RE-EVALUATED, NOT DONE
+- **Reason (as originally written):** `MockAIPort`/`MockToolPort` are redefined with
+  slightly different signatures in multiple test files instead of a single fixture in
+  `tests/support.py`.
+- **Re-evaluation before implementing:** read both pairs side by side.
+  `test_runtime.py`'s `MockAIPort` takes no constructor args and derives its response from
+  the requested `capability` (PLANNING vs TOOL_SELECTION); `test_worker_runtime.py`'s takes
+  an arbitrary JSON string in its constructor and returns it unconditionally, regardless of
+  capability — the point of that test is to control the AI's raw output directly. Same
+  story for the two `MockToolPort`s (one always succeeds; the other branches on which
+  `ToolCapability` was requested). These are not the *same* fixture accidentally
+  reimplemented twice — they're two different, intentionally-small test doubles that
+  happen to share a name.
+- **Impact if forced anyway:** a shared fixture flexible enough to cover both use cases
+  (constructor-injected canned response *and* capability-keyed branching) would need more
+  parameters/branches than either individual mock has today — net more complexity, not
+  less, and a reader of either test file would now need to open `tests/support.py` to
+  understand what the mock in front of them actually does. That's the opposite of this
+  release's explicit "do not add unnecessary abstractions" instruction.
+- **Also worth noting:** the original justification ("divergent mocks are exactly how
+  P0-1 happened") doesn't hold up under scrutiny either — P0-1's root cause was that *all*
+  of these mocks used the pre-enum-migration string API, i.e. they were stale relative to
+  production, not inconsistent with each other. That root cause was already fixed directly
+  in P0-1's commit.
+- **Disposition:** declined. Leaving these as small, self-contained, per-file test doubles
+  — the normal pytest pattern — rather than merging them into a shared abstraction that
+  doesn't reduce real risk.
 
 ### P1-2 — Fix cross-thread `asyncio.Queue.put_nowait()` in `EventStreamer` — ✅ FIXED
 - **Reason:** `ReasoningLoop.execute_goal` runs via FastAPI `BackgroundTasks` (worker

@@ -245,11 +245,15 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
   code. (This is the second dead-code claim in this document that turned out false on
   re-verification, alongside the P2-2 "not exploitable" correction — treat any remaining
   unqualified claim in this document with the same skepticism until it's been re-checked.)
-- `MockAIPort`/`MockToolPort` defined inline in several test files with slightly different
+- `MockAIPort`/`MockToolPort` defined inline in several test files with different
   signatures each time (`tests/unit/runtime/test_runtime.py`,
-  `tests/unit/worker/test_worker_runtime.py`) instead of a single shared fixture in
-  `tests/support.py` — duplicated test scaffolding, not production risk, but worth
-  consolidating (P5).
+  `tests/unit/worker/test_worker_runtime.py`) — **evaluated for consolidation (P1-1) and
+  declined**: on inspection these aren't accidentally-duplicated copies of the same
+  fixture, they're intentionally different test doubles (one derives its response from the
+  requested capability, the other returns a constructor-injected canned response
+  unconditionally) that happen to share a class name. Forcing them into one shared,
+  more-flexible fixture would add complexity rather than remove it. See `V1_RELEASE_PLAN.md`
+  P1-1 for the full reasoning.
 - ~~`time.sleep(0.5)` hardcoded in the reasoning loop's hot path~~ — removed this session
   (P3-1).
 
