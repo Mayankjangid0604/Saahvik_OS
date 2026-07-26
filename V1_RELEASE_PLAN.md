@@ -271,12 +271,19 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 
 ## P5 — Developer Experience
 
-### P5-1 — Pin dev tooling (pytest, coverage, lint, type-check) in `pyproject.toml`
-- **Reason:** `pyproject.toml` declares only `fastapi`/`uvicorn`; pytest/coverage aren't
-  listed as dependencies anywhere, so a fresh clone can't run the test suite without
+### P5-1 — Pin dev tooling (pytest, coverage) in `pyproject.toml` — ✅ FIXED
+- **Reason:** `pyproject.toml` declared only `fastapi`/`uvicorn`; pytest/coverage weren't
+  listed as dependencies anywhere, so a fresh clone couldn't run the test suite without
   guessing what to install.
 - **Impact:** Contributor friction; this audit itself required manually installing pytest.
-- **Effort:** S (~1h): add a `[project.optional-dependencies] dev` group.
+- **Effort:** S (~1h).
+- **Resolution:** Added a `[project.optional-dependencies] dev` group with `pytest>=8` and
+  `pytest-cov>=5` (the versions actually used to run this session's test suite: pytest
+  9.1.1, pytest-cov 7.1.0). `pip install -e .[dev]` now gets a contributor everything
+  needed to run `pytest`. Lint/type-check tooling was in the original item's title but no
+  such tooling exists anywhere in this repo today (no `mypy`/`ruff`/`flake8` config found
+  during the audit) — adding one would be introducing new process, not pinning what's
+  already used, so left out of scope here rather than silently added.
 
 ### P5-2 — Delete confirmed dead code — ✅ DONE (2 of 3 original claims were wrong)
 - **Reason (as originally written):** `domain/operations/tools.py` (empty `pass` tool

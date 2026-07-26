@@ -71,7 +71,7 @@ Saahvik_OS/
 │   │                                infrastructure/providers/runtime/worker
 │   └── integration/                 3 files (ceo_runtime, file_action_logger, file_thought_logger)
 ├── main.py, drive_ceo.py            entrypoints
-└── pyproject.toml                   deps: fastapi, uvicorn only; no lint/type/test tooling pinned
+└── pyproject.toml                   deps: fastapi, uvicorn; dev extra (pytest, pytest-cov)
 ```
 
 190 Python files under `src/`, ~5.1k LOC in `src/`, ~1.9k LOC in `tests/`.
