@@ -137,18 +137,45 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   `test_reasoning_loop_fails_loud_on_unparseable_plan`, which asserts the tool port's
   `execute_tool` is never called.
 
-### P1-4 — Wire `LiveAIPort` to the actual `AIRouter`/Ollama backend, or rename it
-- **Reason:** `LiveAIPort.request_capability` is fully scripted (canned text keyed on
+### P1-4 — Wire `LiveAIPort` to the actual `AIRouter`/Ollama backend, or rename it — ✅ FIXED (with an honest, disclosed testing limitation)
+- **Reason:** `LiveAIPort.request_capability` was fully scripted (canned text keyed on
   prompt substrings) despite the router/registry/Ollama client all being constructed and
-  passed in. It never calls `self.router`.
-- **Impact:** Misleading naming aside, no code path in this repo currently performs a real
-  model call, which means "AI Routing" and "Provider Discovery" reliability checklist items
-  are unverified against a real backend.
-- **Effort:** M (~3-4h): either implement the real routing call (route capability → model →
-  `OllamaProvider.generate()`) behind a feature flag, with the scripted version kept only for
-  demo/offline mode, or explicitly rename it `ScriptedDemoAIPort` so nobody mistakes it for
-  production wiring. Recommend the former given the ROADMAP's "Real project validation" goal
-  for this RC stage.
+  passed in. It never called `self.router`.
+- **Impact:** Misleading naming aside, no code path in this repo performed a real model
+  call, which meant "AI Routing" and "Provider Discovery" reliability checklist items were
+  unverified against a real backend.
+- **Effort:** M (~3-4h), actual.
+- **Resolution:** `LiveAIPort.request_capability` now calls `self.router.route(capability)`
+  to get an `AIExecutionPlan`, looks up the provider by `plan.provider_name` in
+  `self.registry`, builds a real `AIRequest` (prompt, system_prompt, temperature,
+  max_tokens, json_mode, `metadata["model_name"]`), and calls `provider.generate(request)`
+  — exactly the wiring that was already constructed and passed in but unused. If routing
+  fails (`RoutingError` — e.g. no healthy model registered) or the provider call itself
+  fails (`ProviderUnavailableError` etc., all subclasses of `AIPlatformError`), it's caught
+  and turned into an `AIResponse` carrying an `AI_PROVIDER_ERROR:` marker and
+  `finish_reason="error"` instead of propagating an exception — `ReasoningLoop`/`WorkerLoop`
+  already treat unparseable AI output as a graceful step/plan failure that resolves to
+  `SEEK_APPROVAL` (P1-3), so an unavailable AI backend now degrades exactly the same way
+  instead of crashing the reasoning loop.
+- **What was and wasn't verified, stated plainly:** the routing/error-handling *logic* is
+  covered by 5 tests in `tests/unit/interfaces/test_live_ai_port.py`, including one that
+  drives a full `ReasoningLoop.execute_goal()` with a real, empty `ModelRegistry` (no
+  Ollama server registered) end to end and confirms it resolves to a well-formed
+  `SEEK_APPROVAL` rather than an unhandled exception — this is, not coincidentally, exactly
+  the state this development environment is actually in (no Ollama server reachable here),
+  so it's a real, not simulated, exercise of the "AI backend unavailable" path. **What
+  could not be verified in this environment: an actual successful call to a running Ollama
+  server with a real model returning real inference output.** No Ollama instance is
+  reachable from this sandbox, so the "happy path" through `OllamaProvider.generate()` to a
+  live model is implemented per the design already present in `ollama_provider.py`/
+  `ollama_client.py` (both pre-existing, unmodified by this change) but has not been
+  exercised against a real backend in this session. Before relying on this in production,
+  run a real goal against a running Ollama instance with at least one pulled model and
+  confirm end-to-end behavior — this is called out explicitly rather than silently claimed
+  as fully verified.
+- The feature-flag/rename alternative considered in the original item was dropped in favor
+  of direct wiring with graceful degradation, since that gives the real behavior (attempt a
+  real model, fail safe if unavailable) rather than a permanent demo-mode toggle.
 
 ### P1-5 — Test the `ApprovalEngine` end-to-end (depends on P0-2) — ✅ DONE
 - **Reason:** No test currently drives a goal from step failure through to a queued,

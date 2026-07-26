@@ -120,16 +120,27 @@ is violated is in tests that predate the enum migration (§9, P0-1).
 this session (P3-1). Measured effect: full test suite wall time dropped from ~3.6s to
 ~0.6s.
 
-## 5. Provider Flow
+## 5. Provider Flow (✅ fixed — was P1-4 — with a disclosed testing limitation)
 
 - **AI:** `ModelRegistry` holds discovered models; `AIRouter` maps a `Capability` to a model
   by routing rules in `AIConfig`; `OllamaProvider`/`OllamaClient` is the only live backend.
-  `LiveAIPort` in `ceo_api.py` currently **hardcodes canned responses** keyed on prompt
-  substrings (`"workspace directory" in prompt`, etc.) instead of calling through the router
-  — i.e. the wiring for live Ollama inference exists (`ai_router`, `live_ai_port` are built)
-  but `LiveAIPort.request_capability` never uses `self.router`. This is demo-scripted, not
-  a bug in the strict sense, but it means **no code path in this repo actually calls a real
-  model at request time** — see P1-4.
+  `LiveAIPort` in `ceo_api.py` previously **hardcoded canned responses** keyed on prompt
+  substrings instead of calling through the router — the wiring existed (`ai_router`,
+  `live_ai_port` were built) but was never used. It now calls
+  `router.route(capability) → registry.get_provider(plan.provider_name) →
+  provider.generate(AIRequest(...))` for real, and catches routing/provider failures
+  (`AIPlatformError` and subclasses) into a graceful error-marker `AIResponse` instead of
+  raising, so `ReasoningLoop`/`WorkerLoop`'s existing unparseable-output handling (P1-3)
+  degrades an unavailable AI backend the same way it degrades a malformed response —
+  resolving to `SEEK_APPROVAL` rather than crashing.
+  **Disclosed limitation:** this sandbox has no reachable Ollama server, so while the
+  routing logic and the "backend unavailable" degradation path are both verified by tests
+  (including one driving a full `ReasoningLoop.execute_goal()` end to end against a real,
+  empty `ModelRegistry`), an actual successful call to a running Ollama server returning
+  real model output has **not** been exercised in this session. `ollama_provider.py`/
+  `ollama_client.py` were not modified — the happy path is implemented per their existing,
+  pre-existing design, but validate it against a real Ollama instance before depending on
+  it in production.
 - **Tools:** `ToolRegistry.auto_discover()` reflects over `providers/tools/implementations`,
   instantiates any class exposing `name`/`capabilities`/`execute`, and registers it.
   `ToolRouter.route(capability)` linear-scans providers for one whose `capabilities` list
@@ -229,8 +240,10 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 - The 8 domain "milestone" packages (strategy/ops/org/research/knowledge/optimisation/growth/evolution) — each has an orchestrator + dedicated test file, all passing
 
 ### ⚠ Incomplete
-- `LiveAIPort.request_capability` — hardcoded canned responses, never calls `AIRouter`/`OllamaProvider` (§5)
-- `FileSessionRepository.load()` — discards saved state (§8, P0-3)
+- ~~`LiveAIPort.request_capability` — hardcoded canned responses~~ — fixed this session
+  (§5, P1-4), though the live-Ollama happy path is untested in this sandbox (no server
+  reachable) — see §5 for the disclosed limitation.
+- ~~`FileSessionRepository.load()` — discards saved state~~ — fixed this session (§8, P0-3)
 - `application/ports/knowledge.py`, `operations.py`, `research_provider.py` — `ABC` ports with only docstring-stub methods, several implemented by nothing but `DummyResearchProvider`
 - `ReasoningLoop._research()` — no-op `pass`, `RESEARCHING` state transition does nothing
 - `_reflect_on_step()` — trivial `status == COMPLETED` check, not real self-evaluation despite ROADMAP calling this "Self-Evaluation Loop" ✅ done
@@ -273,7 +286,9 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 
 ## 12. Mock / Placeholder Implementations
 
-- `LiveAIPort` in `ceo_api.py` — scripted/canned, not a real LLM call path (§5)
+- ~~`LiveAIPort` in `ceo_api.py` — scripted/canned, not a real LLM call path~~ — fixed
+  this session (§5, P1-4); the live-Ollama happy path itself remains untested here
+  (no server reachable in this sandbox).
 - `DummyResearchProvider` — explicit dummy, correctly named, low risk; now lives in
   `tests/support.py` where it belongs (moved this session, was misfiled as production infra)
 - ~~`FileSessionRepository.load()` — silently returns a fake session instead of the real
@@ -313,8 +328,9 @@ logs rather than user- or contributor-facing docs.
 2. ~~**P0-3** — `FileSessionRepository.load()` discards state (§8)~~ — fixed this session,
    including the P1-6 follow-up (plan/step history now round-trips too, not just
    state/memory).
-3. **P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5); the "Live"
-   naming is misleading — it's fully scripted.
+3. ~~**P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5)~~ — fixed
+   this session; the live-Ollama happy path remains untested in this sandbox specifically
+   (no server reachable), disclosed rather than assumed working.
 4. ~~**P1-2** — Cross-thread `asyncio.Queue.put_nowait()` call from a background-task
    thread (§7)~~ — fixed this session.
 5. ~~**P0-4** — `EventDispatcher.dispatch()` wildcard subscriptions never matched real
@@ -372,8 +388,12 @@ logs rather than user- or contributor-facing docs.
    `/health`, the WebSocket endpoint, and the static dashboard mount remain intentionally
    ungated.
 5. No input validation on `GoalRequest.description` (free text, unbounded, flows directly
-   into an AI prompt) — low risk today since `LiveAIPort` is canned (P1-4), but a real prompt
-   injection surface once live inference is wired up.
+   into an AI prompt) — **now a live concern, not a theoretical one**: since `LiveAIPort`
+   was wired to call a real model (P1-4), this is a real prompt-injection surface once a
+   live Ollama backend is actually in use, not a hypothetical future one. Not fixed in this
+   session — flagged clearly here rather than silently left as a downgraded "low risk"
+   note that no longer reflects reality. A reasonable follow-up: length-cap the field and/or
+   document that goal descriptions are trusted-owner input, not arbitrary third-party text.
 
 ## 17. Performance Notes (measured/observed, not yet load-tested)
 
@@ -384,18 +404,18 @@ logs rather than user- or contributor-facing docs.
 - No caching observed between AI capability requests, no batching — not measured under load
   since there's no load-testing harness yet (see V1_RELEASE_PLAN P3 items).
 
-## 18. Dependency Graph
+## 18. Dependency Graph (updated — was stale on two edges fixed this session)
 
 ```
-Interfaces (FastAPI/WebSocket)
+Interfaces (FastAPI/WebSocket, now with bearer-token auth on governance routes)
         │
         ▼
 Runtime (ReasoningLoop) ──► Worker (WorkerLoop)
         │                         │
         ▼                         ▼
 Governance (PolicyEngine,   Providers (ToolRouter → Filesystem/Shell/Python/Git/Browser)
-ApprovalEngine — NOT        Providers (AIRouter → OllamaProvider, currently bypassed by
-connected to Runtime)       the canned LiveAIPort)
+ApprovalEngine — now        Providers (AIRouter → OllamaProvider, now actually reached by
+connected via P0-2)         LiveAIPort per P1-4, not bypassed)
         │
         ▼
 Infrastructure (FileSessionRepository, FileAuditLog, EventDispatcher)
@@ -427,14 +447,20 @@ not just `state`/`memory` (P1-6), so a recovered session resumes at the exact st
 on. A second latent audit-integrity bug (`FileAuditLog` instances silently sharing one
 global log destination) was found and fixed opportunistically while adding auth tests
 (P1-7). The three governance-sensitive REST endpoints now require a bearer token when
-`ENTERPRISE_OS_API_TOKEN` is set (P2-3). Suite: **110 passed, 1 skipped, 0 failed, 90%
-coverage** (up from 72/6/1, 85%). The architecture remains sound and the Executive/Worker/
-Tool loop genuinely works end-to-end with a real, resolvable governance gate, a live event
-stream, working session recovery, and an auditable, order-independent audit log.
+`ENTERPRISE_OS_API_TOKEN` is set (P2-3). `LiveAIPort` now actually routes through
+`AIRouter`/`ModelRegistry` to a real provider instead of returning scripted text, degrading
+gracefully (to `SEEK_APPROVAL`, not a crash) when no AI backend is available — verified
+live in this very environment, which has no reachable Ollama server (P1-4); the live-Ollama
+happy path itself is unverified here and flagged as such rather than assumed. Suite: **115
+passed, 1 skipped, 0 failed, 91% coverage** (up from 72/6/1, 85%). The architecture remains
+sound and the Executive/Worker/Tool loop genuinely works end-to-end with a real, resolvable
+governance gate, a live event stream, working session recovery, an auditable
+order-independent audit log, and a real (if here-unverified-against-a-live-model) AI
+routing path.
 
 **Still NOT READY for a v1.0 tag** — the P3/P4/P5 backlog in `V1_RELEASE_PLAN.md` remains
-open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything today
-runs against scripted responses), no performance baseline has been measured (P3-2), and
-none of the 10 user/contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist
-yet (P4-1). See `V1_RELEASE_PLAN.md` for the full prioritized path and current status of
-each item.
+open, most notably: no performance baseline has been measured (P3-2), none of the 10 user/
+contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist yet (P4-1), and
+`LiveAIPort`'s live-Ollama happy path needs validation against a real running Ollama
+instance before this is trusted in production (P1-4's disclosed limitation). See
+`V1_RELEASE_PLAN.md` for the full prioritized path and current status of each item.

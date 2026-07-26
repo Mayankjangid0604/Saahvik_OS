@@ -20,6 +20,7 @@ from enterprise_os.providers.ai.registry import ModelRegistry
 from enterprise_os.providers.ai.config import AIConfig
 from enterprise_os.providers.ai.ollama_provider import OllamaProvider
 from enterprise_os.providers.ai.ollama_client import OllamaClient
+from enterprise_os.providers.ai.exceptions import AIPlatformError, ProviderUnavailableError
 
 from enterprise_os.providers.tools.router import ToolRouter
 from enterprise_os.providers.tools.registry import ToolRegistry
@@ -29,34 +30,52 @@ from enterprise_os.providers.tools.exceptions import ToolNotFoundError
 from enterprise_os.providers.tools.capability import ToolCapability
 
 class LiveAIPort(AIPort):
+    """Routes capability requests through the real AIRouter/ModelRegistry to
+    whichever provider (e.g. OllamaProvider) is actually registered and
+    healthy for that capability.
+
+    If routing fails (no suitable/healthy model, e.g. no Ollama server
+    running or no models pulled yet) or the provider call itself fails, this
+    returns an AIResponse carrying an error marker instead of raising --
+    ReasoningLoop/WorkerLoop already treat unparseable AI output as a graceful
+    step/plan failure that surfaces via SEEK_APPROVAL (see reasoning_loop.py),
+    so a down AI backend degrades the same way rather than crashing the
+    reasoning loop with an unhandled exception.
+    """
+
     def __init__(self, router: AIRouter, registry: ModelRegistry):
         self.router = router
         self.registry = registry
 
     def request_capability(self, capability: Capability, prompt: str, system_prompt: str = "", kwargs=None) -> AIResponse:
-        if capability == Capability.PLANNING:
-            text = '''```json
-{
-    "steps": [
-        {"id": "step-1", "description": "Create a workspace directory for the Flask app"},
-        {"id": "step-2", "description": "Create app.py with a basic route"},
-        {"id": "step-3", "description": "Test the Flask app logic using python tool"}
-    ]
-}
-```'''
-        elif capability == Capability.TOOL_SELECTION:
-            if "workspace directory" in prompt:
-                text = '{"capability": "SHELL_EXECUTE", "arguments": {"command": "mkdir flask_blog"}}'
-            elif "app.py" in prompt:
-                text = '{"capability": "FILE_WRITE", "arguments": {"path": "flask_blog/app.py", "content": "from flask import Flask\\napp = Flask(__name__)\\n\\n@app.route(\'/\')\\ndef index():\\n    return \'Blog Home\'\\n\\nif __name__ == \'__main__\':\\n    app.run()\\n"}}'
-            elif "Test the Flask" in prompt:
-                text = '{"capability": "PYTHON_EXECUTE", "arguments": {"script": "print(\\"Testing flask app structure... OK\\")"}}'
-            else:
-                text = '{"capability": "SHELL_EXECUTE", "arguments": {"command": "echo Unknown step"}}'
-        else:
-            text = "Completed successfully."
-            
-        return AIResponse(text=text, provider="mocked-llm", model="mock-model", capability=capability, finish_reason="stop", duration=0.5, prompt_tokens=10, completion_tokens=10, total_tokens=20)
+        try:
+            plan = self.router.route(capability)
+            provider = self.registry.get_provider(plan.provider_name)
+            if provider is None:
+                raise ProviderUnavailableError(f"No AI provider registered for '{plan.provider_name}'")
+
+            request = AIRequest(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                capability=capability,
+                temperature=plan.temperature,
+                max_tokens=plan.max_tokens,
+                json_mode=plan.json_mode,
+                metadata={"model_name": plan.model_name},
+            )
+            return provider.generate(request)
+        except AIPlatformError as e:
+            return AIResponse(
+                text=f"AI_PROVIDER_ERROR: {e}",
+                provider="none",
+                model="none",
+                capability=capability,
+                finish_reason="error",
+                duration=0.0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            )
 
 class LiveToolPort(ToolPort):
     def __init__(self, router: ToolRouter):
