@@ -156,16 +156,30 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 
 ## P2 — Security
 
-### P2-1 — Replace shell command blocklist with an allowlist
-- **Reason:** `CommandRestrictionPolicy` blocks 5 substrings (`rm -rf`, `sudo`, `mkfs`,
+### P2-1 — Harden the shell command policy against blocklist bypass — ✅ FIXED
+- **Reason:** `CommandRestrictionPolicy` blocked 5 substrings (`rm -rf`, `sudo`, `mkfs`,
   `chown`, `chmod`) via plain `in` checks against a command that is then run with
-  `subprocess.run(shell=True)`. Trivially bypassed by whitespace, absolute paths, piping to
-  an interpreter, or any destructive command simply not on the list.
-- **Impact:** This is the sharpest edge in the security checklist — "arbitrary shell
-  execution" is currently possible for anything not matching 5 fixed strings.
-- **Effort:** M (~3-4h): design an explicit allowlist of permitted command *shapes* (or
-  restrict to non-`shell=True` argv execution for a fixed tool set), add security tests that
-  attempt the bypass strings identified in the audit and confirm they're now blocked.
+  `subprocess.run(shell=True)`. Trivially bypassed by whitespace, absolute paths, or
+  chaining a forbidden command after an allowed one.
+- **Impact:** This was the sharpest edge in the security checklist — "arbitrary shell
+  execution" was possible for anything not matching 5 fixed substrings.
+- **Effort:** M (~3-4h).
+- **Resolution:** A true allowlist of permitted command *shapes* was considered but
+  rejected: `ShellProvider` is a general-purpose shell tool the CEO/worker use for
+  arbitrary build/test/file commands (confirmed via `LiveAIPort`'s scripted examples —
+  `mkdir`, writing files, running Python), so a strict argument allowlist would break the
+  tool's intended use — exactly the kind of redesign this release is not meant to do.
+  Instead, hardened the existing blocklist model to close the specific bypasses found in
+  the audit: the command is now split on `;`/`&&`/`||`/`|` into the sub-commands it could
+  actually invoke, each parsed with `shlex.split()`, and the *actual executable name*
+  (path-stripped) is checked against the forbidden set — closing the whitespace,
+  absolute-path, and chaining bypasses. Command substitution (`$(...)` / backticks), which
+  can hide a sub-command from this segment-level view, is rejected outright. This is **not**
+  a full shell sandbox — documented as a residual limitation, not overclaimed as solved.
+  Added `tests/unit/governance/test_command_restriction_policy.py` (12 tests): legitimate
+  commands still pass, the direct forbidden case still blocks, and all 6 bypass strings
+  identified in the audit (extra whitespace, absolute path, `&&`/`;`/`||`/`|`-chained,
+  substitution) are now correctly blocked.
 
 ### P2-2 — Switch path-containment checks to `Path.is_relative_to()`
 - **Reason:** `WorkspaceConfinementPolicy` and `FilesystemProvider._resolve_safe_path()`

@@ -208,7 +208,7 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 - `runtime/` core (`ExecutiveSession`, `ExecutiveState`, `Plan`, `Step`, `Decision`, `events.py`) — 100% covered
 - `providers/tools/registry.py`, `router.py`, `capability.py`, `request.py`, `response.py`
 - `providers/tools/implementations/{filesystem,shell,python,git,browser}_provider.py`
-- `governance/policy_engine.py`, `WorkspaceConfinementPolicy`, `CommandRestrictionPolicy` (logic correct; policy *content* is weak, see P2-1)
+- `governance/policy_engine.py`, `WorkspaceConfinementPolicy`, `CommandRestrictionPolicy` (hardened this session — see §16, was P2-1)
 - `governance/approval_engine.py` (now wired into `ReasoningLoop` — see §6, was P0-2)
 - `worker/worker_loop.py`, `worker_models.py`, `worker_session.py`
 - `interfaces/api/websocket.py`, static dashboard (`interfaces/web/`)
@@ -267,8 +267,8 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 - No integration test hitting the FastAPI endpoints (`/ceo/goal`, `/approvals`, `/health`,
   the websocket) via `TestClient` — `tests/integration/` covers `ceo_runtime` (the domain
   loop) and the file loggers, but not the HTTP/WS surface. Still open.
-- No test for `CommandRestrictionPolicy` bypass strings (e.g. `"rm  -rf"`, `"/bin/sudo"`,
-  destructive commands outside the 5-item blocklist) — see P2-1
+- ~~No test for `CommandRestrictionPolicy` bypass strings~~ — added
+  (`tests/unit/governance/test_command_restriction_policy.py`, 12 tests, P2-1)
 - `worker_loop.py` coverage is 69% (lowest in the runtime/worker layer); the exception
   branches (JSON parse failure, tool execution exception) are untested
 
@@ -302,13 +302,21 @@ logs rather than user- or contributor-facing docs.
 
 ## 16. Security Concerns
 
-1. **P2-1 (highest)** — `CommandRestrictionPolicy` is a 5-string **blocklist**
-   (`rm -rf`, `sudo`, `mkfs`, `chown`, `chmod`) checked via plain substring match against
-   arbitrary shell input that is then run with `subprocess.run(command, shell=True, ...)`.
-   Trivially bypassed (whitespace variants, absolute paths, `curl … | sh`, `python -c
-   "import os; os.remove(...)"`, any command not on the list). This is the single largest
-   security gap relative to the checklist's "command allowlists" / "arbitrary shell
-   execution" items.
+1. ~~**P2-1** — `CommandRestrictionPolicy` was a 5-string **blocklist** checked via plain
+   substring match against arbitrary shell input, trivially bypassed by whitespace
+   variants, absolute paths, or chaining a forbidden command after an allowed one~~ —
+   **hardened this session**: it now parses each `;`/`&&`/`||`/`|`-separated segment with
+   `shlex` and checks the actual invoked executable name (path-stripped) against the
+   forbidden set, and rejects command substitution (`$(...)`/backticks) outright. This
+   closes the whitespace/absolute-path/chaining bypasses. **Residual risk, by design, not
+   an oversight:** this is still a blocklist of *executable names*, not a full shell
+   sandbox — `curl … | sh`, `python -c "import os; os.remove(...)"`, or any other
+   destructive action performed through a generically "safe" interpreter is still possible,
+   because `ShellProvider` is intentionally a general-purpose shell tool. Closing that
+   residual gap would require either a real sandboxing layer (seccomp/container-level
+   isolation) or turning the tool into a fixed-command allowlist, which would change what
+   the tool is for — out of scope for a hardening pass per this release's "do not redesign
+   architecture" constraint. Documented here so it isn't mistaken for solved.
 2. `WorkspaceConfinementPolicy` and `FilesystemProvider._resolve_safe_path()` both do
    `str(target).startswith(str(root))` for containment checks — this is a known-fragile
    pattern (a sibling directory `workspace-evil/` passes a `startswith("workspace")` check
@@ -365,13 +373,15 @@ stream, which was silently completely dead due to an exact-type-matching bug in
 `EventDispatcher.dispatch()`, now works and is thread-safe against background-task dispatch
 (P0-4 and P1-2). A malformed AI planning response no longer silently degrades into a fake
 step that actually executes — it now fails loud and correctly resolves to a queued approval
-(P1-3). Suite: **84 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1, 85%). The
-architecture remains sound and the Executive/Worker/Tool loop genuinely works end-to-end
-with a real, resolvable governance gate and a live event stream.
+(P1-3). The shell command policy has been hardened against every blocklist-bypass class
+found in the audit (P2-1), with a documented, honest residual limitation rather than an
+overclaimed fix. Suite: **96 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1,
+85%). The architecture remains sound and the Executive/Worker/Tool loop genuinely works
+end-to-end with a real, resolvable governance gate and a live event stream.
 
-**Still NOT READY for a v1.0 tag** — the P1-P5 backlog in `V1_RELEASE_PLAN.md` remains
-open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything today
-runs against scripted responses), the shell command policy is a bypassable blocklist
-rather than an allowlist (P2-1, the sharpest security gap), and none of the 10 user/
-contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist yet (P4-1). See
+**Still NOT READY for a v1.0 tag** — the P1/P2/P3/P4/P5 backlog in `V1_RELEASE_PLAN.md`
+remains open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything
+today runs against scripted responses), no endpoint requires authentication (P2-3), and
+none of the 10 user/contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist
+yet (P4-1). See
 `V1_RELEASE_PLAN.md` for the full prioritized path and current status of each item.
