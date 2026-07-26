@@ -1,4 +1,3 @@
-import pytest
 from enterprise_os.runtime.executive_session import ExecutiveSession
 from enterprise_os.runtime.executive_state import ExecutiveState
 from enterprise_os.runtime.goal import Goal

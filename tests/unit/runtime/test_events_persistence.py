@@ -1,5 +1,4 @@
 import pytest
-import os
 from pathlib import Path
 from enterprise_os.runtime.events import EventDispatcher, GoalCreated, Event
 from enterprise_os.runtime.persistence import FileSessionRepository, FileAuditLog

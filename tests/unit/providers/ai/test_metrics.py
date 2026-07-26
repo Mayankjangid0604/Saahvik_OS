@@ -1,4 +1,3 @@
-import pytest
 
 from enterprise_os.providers.ai.metrics import MetricsCollector
 

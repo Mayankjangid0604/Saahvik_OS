@@ -1,7 +1,5 @@
 import sys
-import pytest
 from enterprise_os.providers.tools.registry import ToolRegistry
-import os
 
 def test_auto_discovery():
     registry = ToolRegistry()

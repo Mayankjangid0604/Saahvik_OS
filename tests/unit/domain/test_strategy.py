@@ -2,10 +2,8 @@ import pytest
 from datetime import datetime, timezone
 
 from enterprise_os.domain.strategy.goal import StrategicGoal
-from enterprise_os.domain.strategy.option import StrategicOption
 from enterprise_os.domain.strategy.recommendation import FounderRecommendation
 from enterprise_os.domain.strategy.decision import ExecutiveDecision
-from enterprise_os.domain.research.finding import Finding
 
 
 def test_strategic_goal():

@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from enterprise_os.domain.operations.result import ExecutionResult, SafetyBoundary, ActionBoundaryType
+from enterprise_os.domain.operations.result import ExecutionResult
 from enterprise_os.domain.operations.task import Task, TaskStatus
 from enterprise_os.domain.operations.worker import Worker, WorkerStatus
 from enterprise_os.domain.organisation.blueprint import RoleBlueprint

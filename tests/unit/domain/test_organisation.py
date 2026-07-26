@@ -1,7 +1,5 @@
 import pytest
-from datetime import datetime, timezone
 
-from enterprise_os.domain.strategy.goal import StrategicGoal
 from enterprise_os.domain.organisation.blueprint import OrganisationBlueprint
 from enterprise_os.domain.organisation.review import OrganisationReview
 from enterprise_os.domain.organisation.recommendation import OrganisationalRecommendation

@@ -1,4 +1,3 @@
-import pytest
 from pathlib import Path
 from enterprise_os.providers.tools.implementations.filesystem_provider import FilesystemProvider
 from enterprise_os.providers.tools.request import ToolRequest

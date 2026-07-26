@@ -1,4 +1,3 @@
-import pytest
 
 from enterprise_os.providers.ai.cache import ResponseCache
 from enterprise_os.providers.ai.request import AIRequest

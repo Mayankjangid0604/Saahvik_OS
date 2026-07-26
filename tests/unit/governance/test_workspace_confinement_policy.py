@@ -7,14 +7,14 @@ from enterprise_os.providers.tools.request import ToolRequest
 def test_ignores_non_filesystem_requests(tmp_path: Path):
     policy = WorkspaceConfinementPolicy(workspace_root=str(tmp_path))
     request = ToolRequest(tool_name="SHELL_EXECUTE", arguments={"command": "rm -rf /"})
-    approved, reason = policy.evaluate(request)
+    approved, _ = policy.evaluate(request)
     assert approved is True
 
 
 def test_allows_paths_inside_workspace(tmp_path: Path):
     policy = WorkspaceConfinementPolicy(workspace_root=str(tmp_path))
     request = ToolRequest(tool_name="FILE_READ", arguments={"path": "sub/file.txt"})
-    approved, reason = policy.evaluate(request)
+    approved, _ = policy.evaluate(request)
     assert approved is True
 
 

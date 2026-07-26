@@ -1,4 +1,3 @@
-import pytest
 from enterprise_os.worker.worker_models import WorkItem
 from enterprise_os.worker.worker_session import WorkerSession
 from enterprise_os.worker.worker_loop import WorkerLoop

@@ -15,7 +15,7 @@ def _git(command: str) -> ToolRequest:
 def test_ignores_non_shell_requests():
     policy = CommandRestrictionPolicy()
     request = ToolRequest(tool_name="FILE_READ", arguments={"command": "rm -rf /"})
-    approved, reason = policy.evaluate(request)
+    approved, _ = policy.evaluate(request)
     assert approved is True
 
 
@@ -43,7 +43,7 @@ def test_blocks_forbidden_executable_directly():
 ])
 def test_blocks_previously_working_bypasses(bypass_command):
     policy = CommandRestrictionPolicy()
-    approved, reason = policy.evaluate(_shell(bypass_command))
+    approved, _ = policy.evaluate(_shell(bypass_command))
     assert approved is False, f"expected '{bypass_command}' to be blocked"
 
 
@@ -60,7 +60,7 @@ def test_blocks_command_substitution(substitution_command):
 
 def test_empty_command_is_allowed_here_and_left_to_the_provider():
     policy = CommandRestrictionPolicy()
-    approved, reason = policy.evaluate(_shell(""))
+    approved, _ = policy.evaluate(_shell(""))
     assert approved is True
 
 
