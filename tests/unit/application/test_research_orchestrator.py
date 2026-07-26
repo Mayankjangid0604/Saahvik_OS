@@ -1,7 +1,7 @@
 from enterprise_os.domain.research.plan import ResearchPlan
 from enterprise_os.domain.research.question import ResearchQuestion
 from enterprise_os.application.services.research_orchestrator import ResearchOrchestrator
-from enterprise_os.infrastructure.dummy_provider import DummyResearchProvider
+from tests.support import DummyResearchProvider
 
 def test_research_orchestrator():
     provider = DummyResearchProvider()

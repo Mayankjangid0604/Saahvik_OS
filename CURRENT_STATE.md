@@ -54,8 +54,7 @@ Saahvik_OS/
 │   │                                + the 8 milestone domains above
 │   ├── governance/                  ApprovalEngine, PolicyEngine, WorkspaceConfinementPolicy,
 │   │                                CommandRestrictionPolicy
-│   ├── infrastructure/              persistence, event_store, ai config, dummy_provider.py,
-│   │                                file_document_loader.py
+│   ├── infrastructure/              persistence, event_store, ai config, file_document_loader.py
 │   ├── interfaces/
 │   │   ├── api/                     ceo_api.py (FastAPI app + wiring), websocket.py
 │   │   ├── cli/, events/, web/      static dashboard (HTML/JS)
@@ -228,17 +227,24 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 
 ## 11. Technical Debt / Dead Code / Duplicates
 
-- `src/enterprise_os/domain/operations/tools.py` — `FilesystemTool`/`TerminalTool`/`BrowserTool`/
-  `GitTool`/`PythonTool`/`APITool` are all empty `pass` subclasses of `ToolInterface`,
-  conceptually duplicating `providers/tools/implementations/*`. Nothing imports them
-  (verified: no references outside this file). Dead code — candidate for deletion.
-- `src/enterprise_os/infrastructure/dummy_provider.py` — `DummyResearchProvider`, a test
-  fixture living in `infrastructure/` rather than `tests/`. Only used by
-  `application/services`/tests for the research orchestrator; should move to `tests/fixtures/`
-  or be clearly namespaced as a fixture, not production infra.
-- `src/enterprise_os/infrastructure/config/file_document_loader.py` — a generic JSON
-  loader with reasonable path-escape protection, but grep shows no importers anywhere in
-  `src/`. Either dead code or an intended-but-unwired config abstraction.
+- ~~`src/enterprise_os/domain/operations/tools.py` — `FilesystemTool`/`TerminalTool`/
+  `BrowserTool`/`GitTool`/`PythonTool`/`APITool`, empty `pass` subclasses duplicating
+  `providers/tools/implementations/*`~~ — deleted this session (P5-2). `ToolInterface` in
+  the same file was kept (it's used as a type by `application/ports/operations.py`'s
+  `ToolProviderPort`); the 6 concrete stubs were also removed from
+  `domain/operations/__init__.py`'s `__all__`, where they were re-exported.
+- ~~`src/enterprise_os/infrastructure/dummy_provider.py` — dead code~~ — **correction: this
+  claim was wrong.** `DummyResearchProvider` was a real dependency of
+  `tests/unit/application/test_research_orchestrator.py`, not unused — only its *location*
+  (production `infrastructure/`, not `tests/`) was the actual problem. Moved into
+  `tests/support.py` this session; the `src/` file is deleted.
+- ~~`src/enterprise_os/infrastructure/config/file_document_loader.py` — no importers found
+  in `src/`~~ — **correction: this claim was wrong**, and the error was mine, not a
+  discovery. `FileDocumentLoader` is imported and used by `bootstrap/ceo_bootstrap.py`; the
+  original grep for this file was insufficiently broad. Left untouched — it's real, used
+  code. (This is the second dead-code claim in this document that turned out false on
+  re-verification, alongside the P2-2 "not exploitable" correction — treat any remaining
+  unqualified claim in this document with the same skepticism until it's been re-checked.)
 - `MockAIPort`/`MockToolPort` defined inline in several test files with slightly different
   signatures each time (`tests/unit/runtime/test_runtime.py`,
   `tests/unit/worker/test_worker_runtime.py`) instead of a single shared fixture in
@@ -250,8 +256,10 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 ## 12. Mock / Placeholder Implementations
 
 - `LiveAIPort` in `ceo_api.py` — scripted/canned, not a real LLM call path (§5)
-- `DummyResearchProvider` — explicit dummy, correctly named, low risk
-- `FileSessionRepository.load()` — silently returns a fake session instead of the real one (§8)
+- `DummyResearchProvider` — explicit dummy, correctly named, low risk; now lives in
+  `tests/support.py` where it belongs (moved this session, was misfiled as production infra)
+- ~~`FileSessionRepository.load()` — silently returns a fake session instead of the real
+  one~~ — fixed this session (§8, P0-3)
 - `application/ports/{knowledge,operations,research_provider}.py` — interface-only, several
   methods have no concrete non-dummy implementation anywhere in the tree
 
@@ -390,9 +398,12 @@ overclaimed fix. A real, working path-traversal bypass of workspace confinement 
 more severe than the original audit pass judged it to be, since that pass reasoned about
 exploitability without testing it (P2-2). The unconditional per-step `time.sleep(0.5)` in
 the reasoning loop is gone (P3-1), cutting full test suite wall time from ~3.6s to ~0.6s.
-Suite: **102 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1, 85%). The
-architecture remains sound and the Executive/Worker/Tool loop genuinely works end-to-end
-with a real, resolvable governance gate and a live event stream.
+Confirmed-dead code was removed (P5-2) — and in the process, two more of this document's
+own earlier claims turned out to be wrong on re-verification (`dummy_provider.py` and
+`file_document_loader.py` were both actually in use), corrected in place rather than
+silently dropped. Suite: **102 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1,
+85%). The architecture remains sound and the Executive/Worker/Tool loop genuinely works
+end-to-end with a real, resolvable governance gate and a live event stream.
 
 **Still NOT READY for a v1.0 tag** — the P1/P2/P3/P4/P5 backlog in `V1_RELEASE_PLAN.md`
 remains open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything

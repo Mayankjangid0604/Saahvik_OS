@@ -257,16 +257,33 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 - **Impact:** Contributor friction; this audit itself required manually installing pytest.
 - **Effort:** S (~1h): add a `[project.optional-dependencies] dev` group.
 
-### P5-2 — Delete confirmed dead code
-- **Reason:** `domain/operations/tools.py` (empty `pass` tool stubs, unreferenced),
-  `infrastructure/dummy_provider.py` (test fixture misplaced in production infra),
-  `infrastructure/config/file_document_loader.py` (no importers found in `src/`).
-- **Impact:** Reduces surface area to maintain; matches the mission's explicit "prefer
-  deleting code over adding code."
-- **Effort:** S (~1h): delete `domain/operations/tools.py` outright; move
-  `dummy_provider.py` to `tests/fixtures/`; either wire up `file_document_loader.py` to an
-  actual config load path or delete it — confirm which with a quick grep before deleting in
-  case something outside `src/` (e.g. a script) depends on it.
+### P5-2 — Delete confirmed dead code — ✅ DONE (2 of 3 original claims were wrong)
+- **Reason (as originally written):** `domain/operations/tools.py` (empty `pass` tool
+  stubs, unreferenced), `infrastructure/dummy_provider.py` (test fixture misplaced in
+  production infra), `infrastructure/config/file_document_loader.py` (no importers found).
+- **Correction before acting:** re-grepped each claim before touching anything, per the
+  lesson from P2-2 (an earlier "not exploitable" claim that turned out wrong on testing).
+  Two of the three were also wrong:
+  - `infrastructure/dummy_provider.py` is **not dead** — `DummyResearchProvider` is a real
+    dependency of `tests/unit/application/test_research_orchestrator.py`. It genuinely was
+    misplaced (a test fixture living in `src/`), so the original instinct to relocate it
+    was right; "unused" was not.
+  - `infrastructure/config/file_document_loader.py` is **not dead** —
+    `FileDocumentLoader` is imported and used by `bootstrap/ceo_bootstrap.py`. Original
+    grep for this was insufficiently broad. Left untouched.
+  - `domain/operations/tools.py` was partially right: the 6 concrete subclasses
+    (`FilesystemTool`, `TerminalTool`, `BrowserTool`, `GitTool`, `PythonTool`, `APITool`)
+    are genuinely dead (zero call sites, all empty `pass` bodies duplicating
+    `providers/tools/implementations/*`), but the file's `ToolInterface` ABC is not — it's
+    used as a type in `application/ports/operations.py`'s `ToolProviderPort`. Also, all 6
+    were re-exported in `domain/operations/__init__.py`'s `__all__`, so removing them
+    required updating that file too, not just the stub file.
+- **Effort:** S (~1h), actual.
+- **Resolution:** Deleted the 6 dead stub subclasses from `tools.py`, kept `ToolInterface`;
+  removed them from `domain/operations/__init__.py`'s imports and `__all__`. Moved
+  `DummyResearchProvider` into `tests/support.py` (the existing shared test-fixture module)
+  and updated its one call site; deleted the now-empty `infrastructure/dummy_provider.py`.
+  Left `file_document_loader.py` alone — it's real, used code.
 
 ---
 

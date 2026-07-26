@@ -10,21 +10,3 @@ class ToolInterface(ABC):
     @abstractmethod
     def description(self) -> str:
         pass
-
-class FilesystemTool(ToolInterface):
-    pass
-
-class TerminalTool(ToolInterface):
-    pass
-
-class BrowserTool(ToolInterface):
-    pass
-
-class GitTool(ToolInterface):
-    pass
-
-class PythonTool(ToolInterface):
-    pass
-
-class APITool(ToolInterface):
-    pass
