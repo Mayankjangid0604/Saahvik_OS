@@ -10,10 +10,16 @@ _SEGMENT_SEPARATORS = re.compile(r";|&&|\|\||\|")
 class CommandRestrictionPolicy(Policy):
     """Blocks a fixed set of destructive/privilege-escalating executables.
 
-    ShellProvider is a general-purpose shell tool (the CEO/worker use it for
-    arbitrary build, test, and file-management commands), so this is
+    Applies to both SHELL_EXECUTE and GIT_EXECUTE requests: ShellProvider and
+    GitProvider both ultimately run their "command" argument through
+    subprocess.run(shell=True), so both share the same shell-injection
+    surface and must share the same gate (GitProvider was found unguarded
+    during a v1.0 hardening pass -- see V1_RELEASE_PLAN.md P2-4).
+
+    ShellProvider/GitProvider are general-purpose tools (the CEO/worker use
+    them for arbitrary build, test, and file-management commands), so this is
     deliberately an executable-name blocklist rather than a strict argument
-    allowlist -- a full allowlist would break the tool's intended use. Instead
+    allowlist -- a full allowlist would break their intended use. Instead
     of matching the forbidden name anywhere in the raw command string (which is
     trivially bypassed by whitespace variants, absolute paths, or chaining a
     forbidden command after an allowed one), it parses each ``;``/``&&``/``||``/
@@ -30,6 +36,8 @@ class CommandRestrictionPolicy(Policy):
         "userdel", "passwd", "visudo",
     })
 
+    GATED_TOOL_NAMES = frozenset({"SHELL_EXECUTE", "GIT_EXECUTE"})
+
     def __init__(self):
         self.forbidden_commands = sorted(self.FORBIDDEN_EXECUTABLES)
 
@@ -38,7 +46,7 @@ class CommandRestrictionPolicy(Policy):
         return "CommandRestriction"
 
     def evaluate(self, request: ToolRequest) -> tuple[bool, str]:
-        if request.tool_name != "SHELL_EXECUTE":
+        if request.tool_name not in self.GATED_TOOL_NAMES:
             return True, ""
 
         command = request.arguments.get("command", "")

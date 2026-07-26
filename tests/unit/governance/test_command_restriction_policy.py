@@ -8,6 +8,10 @@ def _shell(command: str) -> ToolRequest:
     return ToolRequest(tool_name="SHELL_EXECUTE", arguments={"command": command})
 
 
+def _git(command: str) -> ToolRequest:
+    return ToolRequest(tool_name="GIT_EXECUTE", arguments={"command": command})
+
+
 def test_ignores_non_shell_requests():
     policy = CommandRestrictionPolicy()
     request = ToolRequest(tool_name="FILE_READ", arguments={"command": "rm -rf /"})
@@ -58,3 +62,32 @@ def test_empty_command_is_allowed_here_and_left_to_the_provider():
     policy = CommandRestrictionPolicy()
     approved, reason = policy.evaluate(_shell(""))
     assert approved is True
+
+
+def test_allows_legitimate_git_commands():
+    policy = CommandRestrictionPolicy()
+    for command in ["log", "status", "git status", "diff HEAD~1"]:
+        approved, reason = policy.evaluate(_git(command))
+        assert approved is True, f"expected '{command}' to be allowed, got: {reason}"
+
+
+def test_blocks_forbidden_executable_chained_after_git_command():
+    """Regression test: GitProvider runs its 'command' argument through
+    subprocess.run(shell=True) exactly like ShellProvider (prefixing it with
+    "git " first), but CommandRestrictionPolicy previously only inspected
+    SHELL_EXECUTE requests -- a command that was correctly blocked when
+    routed as SHELL_EXECUTE sailed through completely unchecked when routed
+    as GIT_EXECUTE, even though it runs through the identical shell=True
+    subprocess call. Confirmed exploitable via a live PolicyEngine +
+    CommandRestrictionPolicy + GitProvider reproduction before this fix."""
+    policy = CommandRestrictionPolicy()
+    approved, reason = policy.evaluate(_git("log; rm -rf /tmp/x"))
+    assert approved is False
+    assert "rm" in reason
+
+
+def test_blocks_command_substitution_in_git_commands():
+    policy = CommandRestrictionPolicy()
+    approved, reason = policy.evaluate(_git("log $(rm -rf /)"))
+    assert approved is False
+    assert "substitution" in reason
