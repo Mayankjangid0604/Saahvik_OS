@@ -45,7 +45,8 @@ class ReasoningLoop:
         
         self._transition(session, ExecutiveState.PLANNING)
         plan = self._create_plan(goal, session)
-        
+        session.context.plan = plan
+
         while True:
             step = plan.get_next_step()
             if not step:

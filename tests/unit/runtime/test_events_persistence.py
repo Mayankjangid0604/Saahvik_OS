@@ -5,6 +5,8 @@ from enterprise_os.runtime.events import EventDispatcher, GoalCreated, Event
 from enterprise_os.runtime.persistence import FileSessionRepository, FileAuditLog
 from enterprise_os.runtime.executive_session import ExecutiveSession
 from enterprise_os.runtime.executive_state import ExecutiveState
+from enterprise_os.runtime.plan import Plan
+from enterprise_os.runtime.step import Step, StepStatus
 
 def test_event_dispatcher():
     dispatcher = EventDispatcher()
@@ -51,6 +53,41 @@ def test_file_session_repository(tmp_path: Path):
     assert loaded_session.id == "test_session"
     assert loaded_session.context.state == ExecutiveState.PLANNING
     assert loaded_session.context.memory == {"pending_approval_id": "approval-123"}
+
+def test_file_session_repository_round_trips_mid_execution_plan(tmp_path: Path):
+    """Regression test for P1-6: save()/load() previously only round-tripped
+    state/memory, silently dropping the in-flight Plan/Step history. A session
+    recovered mid-EXECUTING had no record of which step it was on or what the
+    remaining plan was."""
+    repo = FileSessionRepository(storage_dir=str(tmp_path))
+    session = ExecutiveSession(id="mid_plan_session")
+    session.context.transition(ExecutiveState.EXECUTING)
+    session.context.plan = Plan(
+        id="plan-g1",
+        goal_id="g1",
+        steps=[
+            Step(id="1", description="Create workspace", status=StepStatus.COMPLETED, result="ok"),
+            Step(id="2", description="Write app.py", status=StepStatus.IN_PROGRESS),
+            Step(id="3", description="Run tests", status=StepStatus.PENDING),
+        ],
+        current_step_index=1,
+    )
+
+    repo.save(session)
+    loaded_session = repo.load("mid_plan_session")
+
+    assert loaded_session.context.state == ExecutiveState.EXECUTING
+    restored_plan = loaded_session.context.plan
+    assert restored_plan is not None
+    assert restored_plan.id == "plan-g1"
+    assert restored_plan.goal_id == "g1"
+    assert restored_plan.current_step_index == 1
+    assert [s.status for s in restored_plan.steps] == [
+        StepStatus.COMPLETED, StepStatus.IN_PROGRESS, StepStatus.PENDING,
+    ]
+    assert restored_plan.steps[0].result == "ok"
+    # The recovered session resumes at exactly the step it was on.
+    assert restored_plan.get_next_step().id == "2"
 
 def test_file_session_repository_load_missing_session(tmp_path: Path):
     repo = FileSessionRepository(storage_dir=str(tmp_path))

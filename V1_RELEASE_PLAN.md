@@ -158,20 +158,25 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 - **Resolution:** Landed together with P0-2 as
   `test_reasoning_loop_seeks_approval_on_step_failure`.
 
-### P1-6 — Persist and restore `plan`/`step` history, not just `state`/`memory`
+### P1-6 — Persist and restore `plan`/`step` history, not just `state`/`memory` — ✅ FIXED
 - **Reason:** Discovered while fixing P0-3: `FileSessionRepository.save()` only ever wrote
   `{id, state, memory}` — it never captured the in-flight `Plan`/`Step` objects that
-  `ReasoningLoop` is working through. Fixing `load()` to correctly restore what `save()`
-  writes (P0-3) makes this gap visible rather than silent: a recovered session now correctly
-  resumes at the right `ExecutiveState` with its memory, but a session recovered mid-`EXECUTING`
-  has no record of which step it was on or what the remaining plan was.
-- **Impact:** True session recovery (resuming a goal after a crash/restart mid-execution) is
-  still not possible — only state/memory recovery is. Lower severity than P0-3 was, since no
-  caller currently invokes recovery at all yet, but it's the next thing that will break the
-  moment recovery is wired into a real restart path.
-- **Effort:** M (~2-3h): extend the saved payload with the current `Plan` (id, goal_id, steps
-  with status/result, current_step_index) and reconstruct it in `load()`; add a round-trip
-  test that saves mid-plan and resumes from the exact step.
+  `ReasoningLoop` is working through. A session recovered mid-`EXECUTING` had no record of
+  which step it was on or what the remaining plan was.
+- **Impact:** True session recovery (resuming a goal after a crash/restart mid-execution)
+  was still not possible — only state/memory recovery was.
+- **Effort:** M (~2-3h).
+- **Resolution:** Added an optional `plan: Optional[Plan]` field to `ExecutiveContext`
+  (previously the plan was purely a local variable inside `ReasoningLoop.execute_goal`, not
+  reachable from the session at all). `ReasoningLoop` now assigns `session.context.plan =
+  plan` immediately after creating it, so every `repository.save(session)` call already in
+  the loop captures the live plan/step state as it progresses (steps are mutable
+  dataclasses, so no extra save calls were needed). `FileSessionRepository` gained
+  `_serialize_plan`/`_deserialize_plan` helpers, serializing each step's `id`, `description`,
+  `status`, and `result`, plus the plan's `current_step_index`. Added
+  `test_file_session_repository_round_trips_mid_execution_plan`, which saves a 3-step plan
+  mid-`EXECUTING` (one `COMPLETED`, one `IN_PROGRESS`, one `PENDING`) and asserts the
+  recovered session's `plan.get_next_step()` resumes at exactly the right step.
 
 ---
 

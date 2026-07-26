@@ -176,20 +176,21 @@ call into an `asyncio.Queue`, documented as not thread-safe. `broadcast_loop()` 
 the running loop and `_handle_event` uses `loop.call_soon_threadsafe(...)` once it's known.
 Covered by a real cross-thread regression test in `tests/unit/interfaces/test_websocket.py`.
 
-## 8. Persistence Flow (✅ fixed — was P0-3)
+## 8. Persistence Flow (✅ fixed — was P0-3 and P1-6)
 
-`FileSessionRepository.save()` writes `{id, state, memory}` to `sessions/<id>.json` on every
-transition. `FileSessionRepository.load()` previously discarded that file's contents and
-returned a blank `ExecutiveSession(id=session_id)` ("Minimal loading for demonstration" in
-the source) — "Session Recovery" did not function. It now reads the JSON back and restores
-`context.state` and `context.memory`, verified by a round-trip test
-(`test_file_session_repository`) and a not-found-path test
-(`test_file_session_repository_load_missing_session`). Note: `save()` still does not persist
-`plan`/`step` history (only `state` and `memory`), so a recovered session resumes at the
-correct `ExecutiveState` with its memory intact, but not mid-plan — recovering a session
-that was `EXECUTING` a specific step is not yet possible. This is a smaller, separate gap
-from the original bug (tracked as a new P1 item below) rather than something this fix
-could silently paper over.
+`FileSessionRepository.save()` writes `{id, state, memory, plan}` to `sessions/<id>.json` on
+every transition. `FileSessionRepository.load()` previously discarded the file's contents
+and returned a blank `ExecutiveSession(id=session_id)` ("Minimal loading for demonstration"
+in the source) — "Session Recovery" did not function at all. It now reads the JSON back and
+restores `context.state`, `context.memory`, **and** `context.plan` (added this session —
+previously the plan was purely a local variable in `ReasoningLoop.execute_goal`, not even
+reachable from the session object). `ReasoningLoop` assigns `session.context.plan = plan`
+right after creating it, so every existing `save()` call in the loop already captures live
+plan/step progress. A session recovered mid-`EXECUTING` now resumes at exactly the right
+step, verified by `test_file_session_repository_round_trips_mid_execution_plan` (saves a
+3-step plan with mixed step statuses, reloads, and asserts `plan.get_next_step()` returns
+the correct in-progress step). Also covered: `test_file_session_repository` (state/memory
+round-trip) and `test_file_session_repository_load_missing_session` (not-found path).
 
 ## 9. Worker Flow
 
@@ -296,9 +297,9 @@ logs rather than user- or contributor-facing docs.
 ## 15. Potential Bugs (beyond the 6 failing tests)
 
 1. ~~**P0-2** — Approval flow disconnected (§6)~~ — fixed this session.
-2. ~~**P0-3** — `FileSessionRepository.load()` discards state (§8)~~ — fixed this session.
-   Follow-up (P1-6 in the release plan): `save()`/`load()` still don't round-trip
-   `plan`/`step` history, only `state`/`memory`.
+2. ~~**P0-3** — `FileSessionRepository.load()` discards state (§8)~~ — fixed this session,
+   including the P1-6 follow-up (plan/step history now round-trips too, not just
+   state/memory).
 3. **P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5); the "Live"
    naming is misleading — it's fully scripted.
 4. ~~**P1-2** — Cross-thread `asyncio.Queue.put_nowait()` call from a background-task
@@ -405,9 +406,11 @@ the reasoning loop is gone (P3-1), cutting full test suite wall time from ~3.6s 
 Confirmed-dead code was removed (P5-2) — and in the process, two more of this document's
 own earlier claims turned out to be wrong on re-verification (`dummy_provider.py` and
 `file_document_loader.py` were both actually in use), corrected in place rather than
-silently dropped. Suite: **102 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1,
-85%). The architecture remains sound and the Executive/Worker/Tool loop genuinely works
-end-to-end with a real, resolvable governance gate and a live event stream.
+silently dropped. `FileSessionRepository` now round-trips in-flight `plan`/`step` history,
+not just `state`/`memory` (P1-6), so a recovered session resumes at the exact step it was
+on. Suite: **103 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1, 85%). The
+architecture remains sound and the Executive/Worker/Tool loop genuinely works end-to-end
+with a real, resolvable governance gate, a live event stream, and working session recovery.
 
 **Still NOT READY for a v1.0 tag** — the P1/P2/P3/P4/P5 backlog in `V1_RELEASE_PLAN.md`
 remains open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything
