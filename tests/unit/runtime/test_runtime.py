@@ -74,3 +74,37 @@ def test_reasoning_loop_seeks_approval_on_step_failure():
     pending = approval_engine.get_pending_approvals()
     assert len(pending) == 1
     assert session.context.memory["pending_approval_id"] == pending[0].id
+
+def test_reasoning_loop_fails_loud_on_unparseable_plan():
+    """Regression test for P1-3: an unparseable PLANNING response must not be
+    silently substituted with a fake step that then actually executes -- it
+    should fail immediately, without ever invoking a tool, and the goal should
+    still resolve to a well-formed SEEK_APPROVAL decision."""
+
+    class BadPlanningAIPort:
+        def request_capability(self, capability, prompt, system_prompt="", kwargs=None):
+            text = "this is not valid json"
+            return AIResponse(text=text, provider="mock", model="mock", capability=capability, finish_reason="stop", duration=0.1, prompt_tokens=1, completion_tokens=1, total_tokens=2)
+
+    class CountingToolPort:
+        def __init__(self):
+            self.calls = 0
+        def execute_tool(self, tool_name, arguments=None):
+            self.calls += 1
+            return ToolResponse(success=True, result="mock_result", execution_time=0.1)
+
+    ai = BadPlanningAIPort()
+    tools = CountingToolPort()
+    dispatcher = EventDispatcher()
+    repo = MockSessionRepo()
+    approval_engine = ApprovalEngine(dispatcher)
+    loop = ReasoningLoop(ai, tools, dispatcher, repo, approval_engine=approval_engine)
+
+    session = ExecutiveSession()
+    goal = Goal("g3", "Do something unplannable", "Done")
+
+    decision = loop.execute_goal(session, goal)
+
+    assert decision.outcome == DecisionOutcome.SEEK_APPROVAL
+    assert tools.calls == 0
+    assert len(approval_engine.get_pending_approvals()) == 1

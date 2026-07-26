@@ -294,9 +294,11 @@ logs rather than user- or contributor-facing docs.
 5. ~~**P0-4** — `EventDispatcher.dispatch()` wildcard subscriptions never matched real
    events, so the WebSocket dashboard never received any (§7)~~ — fixed this session,
    found while writing the regression test for the item above.
-5. `_create_plan()`'s JSON-parse fallback silently produces a single placeholder step
-   instead of surfacing the parse failure as an error/approval trigger — a malformed AI
-   response degrades to a fake plan rather than failing loud.
+5. ~~`_create_plan()`'s JSON-parse fallback silently produces a single placeholder step
+   instead of surfacing the parse failure as an error/approval trigger~~ — fixed this
+   session (P1-3): the fallback step is now pre-marked `FAILED`, `_execute_step()`
+   short-circuits on it (dispatching `StepFailed` without invoking any tool), and the goal
+   correctly resolves to a real, queued `SEEK_APPROVAL`.
 
 ## 16. Security Concerns
 
@@ -354,16 +356,18 @@ Infrastructure (FileSessionRepository, FileAuditLog, EventDispatcher)
 
 ## 19. Overall Readiness Assessment
 
-**Status as of this session: all P0 items closed, plus P1-2.** The release-blocking gaps
-identified at audit start are fixed and verified by tests: 6 legacy tests were repaired
+**Status as of this session: all P0 items closed, plus P1-2 and P1-3.** The release-blocking
+gaps identified at audit start are fixed and verified by tests: 6 legacy tests were repaired
 (P0-1), the `SEEK_APPROVAL` decision path is now wired into `ApprovalEngine` (P0-2),
 `FileSessionRepository.load()` now actually restores saved state (P0-3), and — found while
 writing a regression test for a lower-severity item — the WebSocket dashboard's event
 stream, which was silently completely dead due to an exact-type-matching bug in
 `EventDispatcher.dispatch()`, now works and is thread-safe against background-task dispatch
-(P0-4 and P1-2). Suite: **83 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1,
-85%). The architecture remains sound and the Executive/Worker/Tool loop genuinely works
-end-to-end with a real, resolvable governance gate and a live event stream.
+(P0-4 and P1-2). A malformed AI planning response no longer silently degrades into a fake
+step that actually executes — it now fails loud and correctly resolves to a queued approval
+(P1-3). Suite: **84 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1, 85%). The
+architecture remains sound and the Executive/Worker/Tool loop genuinely works end-to-end
+with a real, resolvable governance gate and a live event stream.
 
 **Still NOT READY for a v1.0 tag** — the P1-P5 backlog in `V1_RELEASE_PLAN.md` remains
 open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything today

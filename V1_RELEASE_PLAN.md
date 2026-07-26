@@ -98,15 +98,23 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   subscribers (`EventStreamer`, `Event`). Added
   `test_event_dispatcher_wildcard_subscription_receives_subclass_events`.
 
-### P1-3 — Make `_create_plan()` fail loud on unparseable AI output
-- **Reason:** A malformed PLANNING response currently degrades silently to a single
-  placeholder step ("Fallback Step due to parsing error") that then runs as if it were a
+### P1-3 — Make `_create_plan()` fail loud on unparseable AI output — ✅ FIXED
+- **Reason:** A malformed PLANNING response previously degraded silently to a single
+  placeholder step ("Fallback Step due to parsing error") that then ran as if it were a
   real plan.
-- **Impact:** Confusing failure mode — a broken AI response looks like a deliberately tiny
-  plan rather than an error, making debugging harder and potentially wasting a tool
-  execution on a nonsense step.
-- **Effort:** S (~1h): dispatch a distinguishable event (or route straight to
-  `SEEK_APPROVAL`) instead of silently substituting a fake step.
+- **Impact:** Confusing failure mode — a broken AI response looked like a deliberately tiny
+  plan rather than an error, making debugging harder and wasting a tool execution on a
+  nonsense step.
+- **Effort:** S (~1h).
+- **Resolution:** On parse failure, `_create_plan()` now produces a single step
+  pre-marked `StepStatus.FAILED` with the parse error captured in `result`, instead of a
+  runnable placeholder. `_execute_step()` short-circuits on an already-`FAILED` step,
+  dispatching `StepFailed` and returning without invoking the worker/tool port at all. This
+  reuses the existing `failed_steps` check at the `DECIDING` stage, so the goal correctly
+  resolves to `SEEK_APPROVAL` (and now queues a real approval via P0-2) with zero new event
+  types or control-flow branches added to `execute_goal`. Added
+  `test_reasoning_loop_fails_loud_on_unparseable_plan`, which asserts the tool port's
+  `execute_tool` is never called.
 
 ### P1-4 — Wire `LiveAIPort` to the actual `AIRouter`/Ollama backend, or rename it
 - **Reason:** `LiveAIPort.request_capability` is fully scripted (canned text keyed on

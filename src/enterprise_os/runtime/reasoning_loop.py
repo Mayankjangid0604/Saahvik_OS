@@ -116,17 +116,31 @@ Respond STRICTLY with this JSON format:
             data = json.loads(raw.strip())
             steps = [Step(id=str(s["id"]), description=s["description"]) for s in data.get("steps", [])]
             if not steps:
-                steps = [Step(id="1", description="Fallback step due to empty JSON")]
+                raise ValueError("Planning response contained no steps.")
         except Exception as e:
-            steps = [Step(id="1", description=f"Fallback Step due to parsing error: {e}")]
-            
+            # Don't silently substitute a fake step that then actually executes --
+            # mark it failed up front so _execute_step short-circuits and the goal
+            # correctly ends in SEEK_APPROVAL instead of masking the parse failure.
+            steps = [Step(
+                id="planning",
+                description="Plan generation failed.",
+                status=StepStatus.FAILED,
+                result=f"Failed to parse planning response: {e}",
+            )]
+
         plan = Plan(id=f"plan-{goal.id}", goal_id=goal.id, steps=steps)
         self.dispatcher.dispatch(PlanGenerated(session_id=session.id, plan_id=plan.id, steps_count=len(plan.steps)))
         return plan
-        
+
     def _execute_step(self, session: ExecutiveSession, step: Step) -> None:
+        if step.status == StepStatus.FAILED:
+            # Already failed before execution (e.g. plan generation couldn't be
+            # parsed) -- report it and skip, rather than wasting a tool invocation.
+            self.dispatcher.dispatch(StepFailed(session_id=session.id, step_id=step.id, error=step.result or "Step failed before execution."))
+            return
+
         step.status = StepStatus.IN_PROGRESS
-        
+
         worker_session = WorkerSession(objective=step.description)
         from enterprise_os.providers.tools.capability import ToolCapability
         work_item = WorkItem(
