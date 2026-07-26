@@ -25,14 +25,22 @@ def test_file_session_repository(tmp_path: Path):
     repo = FileSessionRepository(storage_dir=str(tmp_path))
     session = ExecutiveSession(id="test_session")
     session.context.transition(ExecutiveState.PLANNING)
-    
+    session.context.memory["pending_approval_id"] = "approval-123"
+
     repo.save(session)
-    
+
     file_path = tmp_path / "test_session.json"
     assert file_path.exists()
-    
+
     loaded_session = repo.load("test_session")
     assert loaded_session.id == "test_session"
+    assert loaded_session.context.state == ExecutiveState.PLANNING
+    assert loaded_session.context.memory == {"pending_approval_id": "approval-123"}
+
+def test_file_session_repository_load_missing_session(tmp_path: Path):
+    repo = FileSessionRepository(storage_dir=str(tmp_path))
+    with pytest.raises(FileNotFoundError):
+        repo.load("does-not-exist")
 
 def test_file_audit_log(tmp_path: Path):
     dispatcher = EventDispatcher()

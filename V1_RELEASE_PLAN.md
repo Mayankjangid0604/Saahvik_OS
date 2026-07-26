@@ -37,15 +37,18 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   to a resolvable pending approval. `approval_engine` defaults to `None` so existing
   callers/tests that don't pass one are unaffected.
 
-### P0-3 — Fix `FileSessionRepository.load()` to actually restore state
-- **Reason:** `load()` checks the file exists, then discards its contents and returns a
-  blank `ExecutiveSession(id=session_id)`. This is explicitly commented "Minimal loading for
+### P0-3 — Fix `FileSessionRepository.load()` to actually restore state — ✅ FIXED
+- **Reason:** `load()` checked the file exists, then discarded its contents and returned a
+  blank `ExecutiveSession(id=session_id)`. This was explicitly commented "Minimal loading for
   demonstration" in the source.
-- **Impact:** Session Recovery (explicit reliability checklist item) is non-functional. No
-  caller currently exercises this path, so it hasn't caused a visible failure yet — it will
-  the moment recovery is used, e.g., after a server restart mid-goal.
-- **Effort:** M (~2h): serialize/deserialize the fields `save()` already writes
-  (`state`, `memory`), add a round-trip test.
+- **Impact:** Session Recovery (explicit reliability checklist item) was non-functional.
+- **Effort:** M (~2h).
+- **Resolution:** `load()` now reads back the JSON `save()` already writes and restores
+  `context.state` (via `ExecutiveState[data["state"]]`) and `context.memory`.
+  Strengthened `test_file_session_repository` to assert the restored state/memory actually
+  round-trip (it previously only checked `loaded_session.id`, which would have passed even
+  against the old stub), and added `test_file_session_repository_load_missing_session` for
+  the not-found path.
 
 ---
 
@@ -89,11 +92,28 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   production wiring. Recommend the former given the ROADMAP's "Real project validation" goal
   for this RC stage.
 
-### P1-5 — Test the `ApprovalEngine` end-to-end (depends on P0-2)
+### P1-5 — Test the `ApprovalEngine` end-to-end (depends on P0-2) — ✅ DONE
 - **Reason:** No test currently drives a goal from step failure through to a queued,
   resolvable approval.
 - **Impact:** Without this, P0-2 can regress silently.
 - **Effort:** S (~1h), bundled with P0-2's implementation.
+- **Resolution:** Landed together with P0-2 as
+  `test_reasoning_loop_seeks_approval_on_step_failure`.
+
+### P1-6 — Persist and restore `plan`/`step` history, not just `state`/`memory`
+- **Reason:** Discovered while fixing P0-3: `FileSessionRepository.save()` only ever wrote
+  `{id, state, memory}` — it never captured the in-flight `Plan`/`Step` objects that
+  `ReasoningLoop` is working through. Fixing `load()` to correctly restore what `save()`
+  writes (P0-3) makes this gap visible rather than silent: a recovered session now correctly
+  resumes at the right `ExecutiveState` with its memory, but a session recovered mid-`EXECUTING`
+  has no record of which step it was on or what the remaining plan was.
+- **Impact:** True session recovery (resuming a goal after a crash/restart mid-execution) is
+  still not possible — only state/memory recovery is. Lower severity than P0-3 was, since no
+  caller currently invokes recovery at all yet, but it's the next thing that will break the
+  moment recovery is wired into a real restart path.
+- **Effort:** M (~2-3h): extend the saved payload with the current `Plan` (id, goal_id, steps
+  with status/result, current_step_index) and reconstruct it in `load()`; add a round-trip
+  test that saves mid-plan and resumes from the exact step.
 
 ---
 

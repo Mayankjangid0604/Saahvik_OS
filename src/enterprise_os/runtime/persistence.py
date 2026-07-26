@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Protocol, Any
 from enterprise_os.runtime.events import EventDispatcher, Event
 from enterprise_os.runtime.executive_session import ExecutiveSession
+from enterprise_os.runtime.executive_state import ExecutiveState
 from dataclasses import asdict
 
 class SessionRepository(Protocol):
@@ -36,8 +37,14 @@ class FileSessionRepository(SessionRepository):
         path = self.storage_dir / f"{session_id}.json"
         if not path.exists():
             raise FileNotFoundError(f"Session {session_id} not found")
-        # Minimal loading for demonstration
-        return ExecutiveSession(id=session_id)
+
+        with open(path, "r") as f:
+            data = json.load(f)
+
+        session = ExecutiveSession(id=session_id)
+        session.context.state = ExecutiveState[data["state"]]
+        session.context.memory = data.get("memory", {})
+        return session
 
 class FileAuditLog(AuditLog):
     def __init__(self, log_dir: str = "logs") -> None:

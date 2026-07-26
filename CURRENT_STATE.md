@@ -167,24 +167,20 @@ event loop thread), this is a cross-thread call into an `asyncio.Queue`, which i
 as not thread-safe. It works today because CPython's GIL and the queue's simple internals
 make corruption unlikely at low volume, but it's a latent race — see P1-5.
 
-## 8. Persistence Flow (⚠ session recovery is fake)
+## 8. Persistence Flow (✅ fixed — was P0-3)
 
 `FileSessionRepository.save()` writes `{id, state, memory}` to `sessions/<id>.json` on every
-transition — this part works. `FileSessionRepository.load()`, however, is a stub:
-
-```python
-def load(self, session_id: str) -> ExecutiveSession:
-    if not path.exists(): raise FileNotFoundError(...)
-    # Minimal loading for demonstration
-    return ExecutiveSession(id=session_id)
-```
-
-It checks the file exists and then **discards its contents**, returning a fresh session with
-none of the saved state, memory, plan, or step history. "Session Recovery" — explicitly
-called out in the reliability checklist — does not currently function. No code path in the
-API currently calls `load()` at all (goals always start a brand-new `ExecutiveSession`), so
-this has not yet caused an observed failure, but it means the persistence layer cannot
-actually be used for its stated purpose if/when recovery is wired up.
+transition. `FileSessionRepository.load()` previously discarded that file's contents and
+returned a blank `ExecutiveSession(id=session_id)` ("Minimal loading for demonstration" in
+the source) — "Session Recovery" did not function. It now reads the JSON back and restores
+`context.state` and `context.memory`, verified by a round-trip test
+(`test_file_session_repository`) and a not-found-path test
+(`test_file_session_repository_load_missing_session`). Note: `save()` still does not persist
+`plan`/`step` history (only `state` and `memory`), so a recovered session resumes at the
+correct `ExecutiveState` with its memory intact, but not mid-plan — recovering a session
+that was `EXECUTING` a specific step is not yet possible. This is a smaller, separate gap
+from the original bug (tracked as a new P1 item below) rather than something this fix
+could silently paper over.
 
 ## 9. Worker Flow
 
@@ -275,7 +271,9 @@ logs rather than user- or contributor-facing docs.
 ## 15. Potential Bugs (beyond the 6 failing tests)
 
 1. ~~**P0-2** — Approval flow disconnected (§6)~~ — fixed this session.
-2. **P0-3** — `FileSessionRepository.load()` discards state (§8).
+2. ~~**P0-3** — `FileSessionRepository.load()` discards state (§8)~~ — fixed this session.
+   Follow-up (P1-6 in the release plan): `save()`/`load()` still don't round-trip
+   `plan`/`step` history, only `state`/`memory`.
 3. **P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5); the "Live"
    naming is misleading — it's fully scripted.
 4. **P1-5** — Cross-thread `asyncio.Queue.put_nowait()` call from a background-task thread
