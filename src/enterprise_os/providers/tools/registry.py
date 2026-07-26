@@ -24,7 +24,6 @@ class ToolRegistry:
         self._providers.clear()
 
     def auto_discover(self, module_name: str, **kwargs) -> None:
-        import sys
         module = importlib.import_module(module_name)
         
         if not hasattr(module, '__path__'):

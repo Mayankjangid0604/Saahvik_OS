@@ -1,4 +1,3 @@
-import os
 import time
 from pathlib import Path
 from enterprise_os.providers.tools.request import ToolRequest

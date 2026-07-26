@@ -56,6 +56,12 @@ This repository actually has two independent runnable things that are easy to co
    path as the FastAPI app's `ReasoningLoop` — they share the domain model's spirit but not
    an execution path. Don't run both expecting them to coordinate; they don't today.
 
+A third, ungoverned FastAPI app (`interfaces/api/main.py`) existed in this codebase with
+hardcoded/mocked responses, zero authentication, and zero policy enforcement, and was
+**removed** during a round-2 audit after confirming it had no references anywhere in the
+repo (no imports, no tests, no docs, no scripts). If you're reading old commit history and
+wonder where it went, that's why — see `TECHNICAL_DEBT.md`.
+
 ## Demo driver script
 
 `drive_ceo.py` is a demo script that submits a goal to a running API server and polls

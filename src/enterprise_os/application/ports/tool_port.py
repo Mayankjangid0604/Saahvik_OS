@@ -1,5 +1,4 @@
 from typing import Any, Optional, Protocol
-from enterprise_os.providers.tools.request import ToolRequest
 from enterprise_os.providers.tools.response import ToolResponse
 
 from enterprise_os.providers.tools.capability import ToolCapability

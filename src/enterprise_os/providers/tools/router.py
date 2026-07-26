@@ -1,4 +1,3 @@
-from enterprise_os.providers.tools.request import ToolRequest
 from enterprise_os.providers.tools.provider import ToolProvider
 from enterprise_os.providers.tools.registry import ToolRegistry
 from enterprise_os.providers.tools.exceptions import ToolNotFoundError

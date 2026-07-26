@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Any
+from typing import Callable
 
 @dataclass(frozen=True, kw_only=True)
 class Event:

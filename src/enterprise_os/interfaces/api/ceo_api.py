@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from enterprise_os.runtime.events import EventDispatcher
 from enterprise_os.runtime.persistence import FileSessionRepository, FileAuditLog
-from enterprise_os.governance.approval_engine import ApprovalEngine, ApprovalItem
+from enterprise_os.governance.approval_engine import ApprovalEngine
 from enterprise_os.runtime.reasoning_loop import ReasoningLoop
 from enterprise_os.runtime.executive_session import ExecutiveSession
 from enterprise_os.runtime.goal import Goal
@@ -102,7 +102,6 @@ class PolicyEnforcedToolPort(ToolPort):
         self.engine = policy_engine
 
     def execute_tool(self, capability: ToolCapability, arguments: Optional[dict[str, Any]] = None) -> ToolResponse:
-        import time
         req = ToolRequest(tool_name=capability.name, arguments=arguments or {})
         approved, reason = self.engine.evaluate(req)
         if not approved:

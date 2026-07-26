@@ -2,7 +2,7 @@ import itertools
 import json
 import logging
 from pathlib import Path
-from typing import Protocol, Any, Optional
+from typing import Protocol, Any
 from enterprise_os.runtime.events import EventDispatcher, Event
 from enterprise_os.runtime.executive_session import ExecutiveSession
 from enterprise_os.runtime.executive_state import ExecutiveState

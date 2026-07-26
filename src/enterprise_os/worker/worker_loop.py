@@ -48,7 +48,7 @@ Provide your response strictly in the following JSON format, with no markdown fo
             return StructuredResult(
                 work_item_id=work_item.id,
                 success=False,
-                findings=f"Failed to parse AI capability decision: {str(e)}\nRaw Response: {response.text}"
+                findings=f"Failed to parse AI capability decision: {e!s}\nRaw Response: {response.text}"
             )
             
         if not selected_capability or selected_capability not in work_item.allowed_tools:
@@ -72,5 +72,5 @@ Provide your response strictly in the following JSON format, with no markdown fo
             return StructuredResult(
                 work_item_id=work_item.id,
                 success=False,
-                findings=f"Worker failed to execute tool: {str(e)}"
+                findings=f"Worker failed to execute tool: {e!s}"
             )

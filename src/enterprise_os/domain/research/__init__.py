@@ -10,15 +10,15 @@ from enterprise_os.domain.research.source import Source
 
 __all__ = [
     "Evidence",
+    "ExecutiveRecommendation",
     "Fact",
     "FactStatus",
-    "Hypothesis",
-    "HypothesisStatus",
     "Finding",
     "GapStatus",
+    "Hypothesis",
+    "HypothesisStatus",
     "KnowledgeGap",
     "ResearchPlan",
     "ResearchQuestion",
-    "ExecutiveRecommendation",
     "Source",
 ]
