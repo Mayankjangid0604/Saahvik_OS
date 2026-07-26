@@ -61,13 +61,42 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   updates one mock but not the others, and failures surface late.
 - **Effort:** S (~1-2h).
 
-### P1-2 — Fix cross-thread `asyncio.Queue.put_nowait()` in `EventStreamer`
+### P1-2 — Fix cross-thread `asyncio.Queue.put_nowait()` in `EventStreamer` — ✅ FIXED
 - **Reason:** `ReasoningLoop.execute_goal` runs via FastAPI `BackgroundTasks` (worker
   thread); `EventStreamer._handle_event` pushes onto an `asyncio.Queue` not owned by that
-  thread. Not proven to have failed yet, but it's a documented anti-pattern.
+  thread.
 - **Impact:** Latent race that could silently drop or corrupt dashboard events under load.
-- **Effort:** S (~1h): use `loop.call_soon_threadsafe()` or `asyncio.run_coroutine_threadsafe`
-  to hand events back to the event loop safely.
+- **Effort:** S (~1h).
+- **Resolution:** `broadcast_loop()` now captures the running loop (`self._loop =
+  asyncio.get_running_loop()`); `_handle_event` uses `self._loop.call_soon_threadsafe(...)`
+  once that loop is known, falling back to a direct `put_nowait` only when no loop has
+  started yet (e.g. in tests). Added `tests/unit/interfaces/test_websocket.py` with a real
+  cross-thread regression test (`test_handle_event_from_worker_thread_is_delivered_safely`)
+  that dispatches from a `threading.Thread` while `broadcast_loop` is running and asserts
+  the message is delivered to a fake WebSocket connection.
+
+### P0-4 — `EventDispatcher.dispatch()` never matched wildcard subscribers (found while fixing P1-2) — ✅ FIXED
+- **Reason:** Writing the P1-2 regression test surfaced a more severe, previously-untested
+  bug: `dispatch()` matched subscribers by exact `type(event)`, not `isinstance`. Every
+  concrete event dispatched in production is a subclass of `Event` (`GoalCreated`,
+  `StepCompleted`, `DecisionMade`, ...) — the base `Event` class itself is never
+  instantiated directly. `EventStreamer.__init__` subscribes to the base `Event` class with
+  the explicit comment `# Subscribe to all events`, matching the clear design intent of a
+  wildcard subscription — but under exact-type matching, that subscription **never matched
+  a single real event**.
+- **Impact:** This is more severe than the race it was found alongside: the WebSocket
+  dashboard's live event stream was completely non-functional in this codebase — not
+  degraded, not racy, but silently dead. No test caught it because no test previously
+  exercised `EventStreamer` at all (§13 of `CURRENT_STATE.md`, "Missing Tests"). Retroactively
+  reclassified as P0 given it breaks an entire explicit reliability-checklist item
+  ("WebSocket Events", "Dashboard") outright, not just partially.
+- **Effort:** S (~1h, found opportunistically while doing P1-2's ~2h of work).
+- **Resolution:** `EventDispatcher.dispatch()` now iterates registered subscriber types and
+  delivers to any where `isinstance(event, event_type)`, matching both exact-type
+  subscribers (like `FileAuditLog.bind_to`, which lists concrete event classes — unaffected,
+  since `isinstance` reduces to exact-type matching for leaf classes) and wildcard
+  subscribers (`EventStreamer`, `Event`). Added
+  `test_event_dispatcher_wildcard_subscription_receives_subclass_events`.
 
 ### P1-3 — Make `_create_plan()` fail loud on unparseable AI output
 - **Reason:** A malformed PLANNING response currently degrades silently to a single

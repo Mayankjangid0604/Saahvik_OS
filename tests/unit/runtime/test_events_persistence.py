@@ -21,6 +21,21 @@ def test_event_dispatcher():
     assert len(received_events) == 1
     assert received_events[0].goal_id == "g1"
 
+def test_event_dispatcher_wildcard_subscription_receives_subclass_events():
+    """Regression test: EventDispatcher previously matched subscribers by exact
+    type(event), so subscribing to the base Event class (as EventStreamer does,
+    to receive every event for the WebSocket dashboard) never matched any
+    concrete event, since only subclasses like GoalCreated are ever dispatched."""
+    dispatcher = EventDispatcher()
+    received_events = []
+
+    dispatcher.subscribe(Event, lambda evt: received_events.append(evt))
+
+    dispatcher.dispatch(GoalCreated(session_id="s3", goal_id="g3", description="Desc"))
+
+    assert len(received_events) == 1
+    assert received_events[0].goal_id == "g3"
+
 def test_file_session_repository(tmp_path: Path):
     repo = FileSessionRepository(storage_dir=str(tmp_path))
     session = ExecutiveSession(id="test_session")

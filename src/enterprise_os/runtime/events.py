@@ -61,6 +61,7 @@ class EventDispatcher:
         self._subscribers[event_type].append(handler)
         
     def dispatch(self, event: Event) -> None:
-        handlers = self._subscribers.get(type(event), [])
-        for handler in handlers:
-            handler(event)
+        for event_type, handlers in self._subscribers.items():
+            if isinstance(event, event_type):
+                for handler in handlers:
+                    handler(event)

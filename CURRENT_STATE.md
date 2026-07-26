@@ -152,20 +152,29 @@ resolvable entry in `GET /approvals` that the dashboard can act on via
 now bound to the audit log. Covered by
 `test_reasoning_loop_seeks_approval_on_step_failure`.
 
-## 7. Event Flow
+## 7. Event Flow (✅ two bugs fixed this session — was P1-2 and P0-4)
 
-`EventDispatcher` is a straightforward pub/sub (`subscribe(type, handler)` /
-`dispatch(event)`), matched on exact `type(event)` plus a wildcard `Event` subscription used
-by `EventStreamer`. Two independent sync subscribers exist: `FileAuditLog.log_event` (writes
-one JSON line per event to `logs/audit.log`) and `EventStreamer._handle_event` (pushes onto
-an `asyncio.Queue` for WebSocket broadcast).
+`EventDispatcher` is a pub/sub (`subscribe(type, handler)` / `dispatch(event)`). Two
+independent sync subscribers exist: `FileAuditLog.log_event` (writes one JSON line per event
+to `logs/audit.log`, subscribed to a fixed list of concrete event types) and
+`EventStreamer._handle_event` (pushes onto an `asyncio.Queue` for WebSocket broadcast,
+subscribed to the base `Event` class as a wildcard).
 
-⚠ `EventStreamer._handle_event` calls `asyncio.Queue.put_nowait()` from whatever thread
-`dispatch()` runs on. Because `ReasoningLoop.execute_goal` runs inside FastAPI
-`BackgroundTasks.add_task(sync_fn)`, which Starlette executes in a worker thread (not the
-event loop thread), this is a cross-thread call into an `asyncio.Queue`, which is documented
-as not thread-safe. It works today because CPython's GIL and the queue's simple internals
-make corruption unlikely at low volume, but it's a latent race — see P1-5.
+**Fixed — `dispatch()` previously matched by exact `type(event)`.** Since every event
+actually dispatched in production is a subclass (`GoalCreated`, `StepCompleted`, etc.) and
+the base `Event` is never instantiated directly, `EventStreamer`'s wildcard subscription to
+`Event` never matched anything — **the WebSocket dashboard's live event stream was
+completely non-functional**, silently. `dispatch()` now iterates subscribers and delivers
+wherever `isinstance(event, subscribed_type)`, which fixes the wildcard case while leaving
+`FileAuditLog`'s exact-type subscriptions behaviorally unchanged (verified by test).
+
+**Fixed — cross-thread queue write.** `EventStreamer._handle_event` called
+`asyncio.Queue.put_nowait()` from whatever thread `dispatch()` runs on. Because
+`ReasoningLoop.execute_goal` runs inside FastAPI `BackgroundTasks.add_task(sync_fn)`, which
+Starlette executes in a worker thread (not the event loop thread), this was a cross-thread
+call into an `asyncio.Queue`, documented as not thread-safe. `broadcast_loop()` now captures
+the running loop and `_handle_event` uses `loop.call_soon_threadsafe(...)` once it's known.
+Covered by a real cross-thread regression test in `tests/unit/interfaces/test_websocket.py`.
 
 ## 8. Persistence Flow (✅ fixed — was P0-3)
 
@@ -248,12 +257,16 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 
 ## 13. Missing Tests
 
-- No test currently exercises `ApprovalEngine` end-to-end from a `SEEK_APPROVAL` decision
-  (because that wiring doesn't exist — P0-2)
-- No test for `FileSessionRepository.load()` round-tripping actual saved state (it would fail immediately, which is exactly why this gap matters)
+- ~~No test currently exercises `ApprovalEngine` end-to-end from a `SEEK_APPROVAL`
+  decision~~ — added (P0-2).
+- ~~No test for `FileSessionRepository.load()` round-tripping actual saved state~~ — added
+  (P0-3).
+- ~~No test exercised `EventStreamer` at all~~ — added
+  (`tests/unit/interfaces/test_websocket.py`, found the P0-4 wildcard-dispatch bug in the
+  process).
 - No integration test hitting the FastAPI endpoints (`/ceo/goal`, `/approvals`, `/health`,
   the websocket) via `TestClient` — `tests/integration/` covers `ceo_runtime` (the domain
-  loop) and the file loggers, but not the HTTP/WS surface
+  loop) and the file loggers, but not the HTTP/WS surface. Still open.
 - No test for `CommandRestrictionPolicy` bypass strings (e.g. `"rm  -rf"`, `"/bin/sudo"`,
   destructive commands outside the 5-item blocklist) — see P2-1
 - `worker_loop.py` coverage is 69% (lowest in the runtime/worker layer); the exception
@@ -276,8 +289,11 @@ logs rather than user- or contributor-facing docs.
    `plan`/`step` history, only `state`/`memory`.
 3. **P1-4** — `LiveAIPort` never calls the real AI router/Ollama backend (§5); the "Live"
    naming is misleading — it's fully scripted.
-4. **P1-5** — Cross-thread `asyncio.Queue.put_nowait()` call from a background-task thread
-   (§7) — latent race, not yet observed to fail but architecturally unsound.
+4. ~~**P1-2** — Cross-thread `asyncio.Queue.put_nowait()` call from a background-task
+   thread (§7)~~ — fixed this session.
+5. ~~**P0-4** — `EventDispatcher.dispatch()` wildcard subscriptions never matched real
+   events, so the WebSocket dashboard never received any (§7)~~ — fixed this session,
+   found while writing the regression test for the item above.
 5. `_create_plan()`'s JSON-parse fallback silently produces a single placeholder step
    instead of surfacing the parse failure as an error/approval trigger — a malformed AI
    response degrades to a fake plan rather than failing loud.
@@ -338,13 +354,16 @@ Infrastructure (FileSessionRepository, FileAuditLog, EventDispatcher)
 
 ## 19. Overall Readiness Assessment
 
-**Status as of this session: all P0 items closed.** The three release-blocking gaps
+**Status as of this session: all P0 items closed, plus P1-2.** The release-blocking gaps
 identified at audit start are fixed and verified by tests: 6 legacy tests were repaired
-(P0-1), the `SEEK_APPROVAL` decision path is now wired into `ApprovalEngine` (P0-2), and
-`FileSessionRepository.load()` now actually restores saved state (P0-3). Suite: **80
-passed, 1 skipped, 0 failed, 86% coverage** (up from 72/6/1, 85%). The architecture remains
-sound and the Executive/Worker/Tool loop genuinely works end-to-end with a real,
-resolvable governance gate.
+(P0-1), the `SEEK_APPROVAL` decision path is now wired into `ApprovalEngine` (P0-2),
+`FileSessionRepository.load()` now actually restores saved state (P0-3), and — found while
+writing a regression test for a lower-severity item — the WebSocket dashboard's event
+stream, which was silently completely dead due to an exact-type-matching bug in
+`EventDispatcher.dispatch()`, now works and is thread-safe against background-task dispatch
+(P0-4 and P1-2). Suite: **83 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1,
+85%). The architecture remains sound and the Executive/Worker/Tool loop genuinely works
+end-to-end with a real, resolvable governance gate and a live event stream.
 
 **Still NOT READY for a v1.0 tag** — the P1-P5 backlog in `V1_RELEASE_PLAN.md` remains
 open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything today
