@@ -47,8 +47,6 @@ class ReasoningLoop:
         plan = self._create_plan(goal, session)
         
         while True:
-            import time
-            time.sleep(0.5)
             step = plan.get_next_step()
             if not step:
                 break

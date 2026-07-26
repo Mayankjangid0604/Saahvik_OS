@@ -214,14 +214,16 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 
 ## P3 — Performance
 
-### P3-1 — Remove the unconditional `time.sleep(0.5)` in `ReasoningLoop`
-- **Reason:** Every iteration of the main execution loop sleeps 0.5s for no functional
-  reason (no rate limit, no debounce documented).
-- **Impact:** Directly slows every goal execution and every test that exercises the loop.
-  A 3-step goal loses 1.5s doing nothing.
-- **Effort:** XS (~15 min): delete it (or replace with an explicit, configurable pacing
-  hook if it turns out to exist for dashboard-visibility reasons — confirm with the user
-  before deleting if intent is unclear).
+### P3-1 — Remove the unconditional `time.sleep(0.5)` in `ReasoningLoop` — ✅ FIXED
+- **Reason:** Every iteration of the main execution loop slept 0.5s for no functional
+  reason (no rate limit, no debounce documented anywhere in the code or docs).
+- **Impact:** Directly slowed every goal execution and every test that exercises the loop.
+- **Effort:** XS (~15 min).
+- **Resolution:** Deleted. Measured effect: the full test suite's wall time dropped from
+  ~3.6s to ~0.6s (most of the suite exercises the reasoning loop at least once). No
+  behavioral test depended on the delay's existence. If dashboard-visibility pacing turns
+  out to be wanted after live model wiring lands (P1-4), that should be a deliberate,
+  documented, configurable choice — not a silent unconditional sleep.
 
 ### P3-2 — Add a minimal performance baseline harness
 - **Reason:** The mission asks to measure startup/planning/worker-creation/routing/API

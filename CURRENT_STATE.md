@@ -117,8 +117,9 @@ is violated is in tests that predate the enum migration (§9, P0-1).
    post-mortem, dispatched as `EvaluationCompleted`.
 6. Dispatch `SessionFinished`.
 
-Every step of the `while True` loop calls `time.sleep(0.5)` unconditionally
-(`reasoning_loop.py:42`) — see P3-1, this is dead weight in both tests and production.
+~~Every step of the `while True` loop calls `time.sleep(0.5)` unconditionally~~ — removed
+this session (P3-1). Measured effect: full test suite wall time dropped from ~3.6s to
+~0.6s.
 
 ## 5. Provider Flow
 
@@ -243,9 +244,8 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
   `tests/unit/worker/test_worker_runtime.py`) instead of a single shared fixture in
   `tests/support.py` — duplicated test scaffolding, not production risk, but worth
   consolidating (P5).
-- `time.sleep(0.5)` hardcoded in the reasoning loop's hot path (`reasoning_loop.py:42`) —
-  no config flag to disable it; slows every goal execution and every test that exercises the
-  loop by 0.5s per step for no functional reason.
+- ~~`time.sleep(0.5)` hardcoded in the reasoning loop's hot path~~ — removed this session
+  (P3-1).
 
 ## 12. Mock / Placeholder Implementations
 
@@ -348,8 +348,8 @@ logs rather than user- or contributor-facing docs.
 
 ## 17. Performance Notes (measured/observed, not yet load-tested)
 
-- `time.sleep(0.5)` per reasoning-loop iteration (§11) is the most obvious avoidable cost —
-  a 3-step goal spends 1.5s doing nothing.
+- ~~`time.sleep(0.5)` per reasoning-loop iteration~~ — removed this session (P3-1); measured
+  full-suite wall time dropped from ~3.6s to ~0.6s.
 - `ToolRouter.route()` and `ToolRegistry.auto_discover()` are linear scans over small
   in-memory lists — not a bottleneck at current scale, no action needed.
 - No caching observed between AI capability requests, no batching — not measured under load
@@ -388,10 +388,11 @@ found in the audit (P2-1), with a documented, honest residual limitation rather 
 overclaimed fix. A real, working path-traversal bypass of workspace confinement (via a
 `workspace-evil`-style sibling directory) was found, tested, and fixed — this was actually
 more severe than the original audit pass judged it to be, since that pass reasoned about
-exploitability without testing it (P2-2). Suite: **102 passed, 1 skipped, 0 failed, 87%
-coverage** (up from 72/6/1, 85%). The architecture remains sound and the Executive/Worker/
-Tool loop genuinely works end-to-end with a real, resolvable governance gate and a live
-event stream.
+exploitability without testing it (P2-2). The unconditional per-step `time.sleep(0.5)` in
+the reasoning loop is gone (P3-1), cutting full test suite wall time from ~3.6s to ~0.6s.
+Suite: **102 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1, 85%). The
+architecture remains sound and the Executive/Worker/Tool loop genuinely works end-to-end
+with a real, resolvable governance gate and a live event stream.
 
 **Still NOT READY for a v1.0 tag** — the P1/P2/P3/P4/P5 backlog in `V1_RELEASE_PLAN.md`
 remains open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything
