@@ -7,3 +7,6 @@ sessions/
 workspace/
 flask_blog/
 
+.coverage
+*.egg-info/
+
