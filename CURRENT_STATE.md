@@ -313,14 +313,16 @@ lowercase `"good_tool"` strings) and are the actual bug — not the production c
 - `worker_loop.py` coverage is 69% (lowest in the runtime/worker layer); the exception
   branches (JSON parse failure, tool execution exception) are untested
 
-## 14. Missing Documentation
+## 14. Missing Documentation (✅ fixed — was P4-1)
 
-None of the following exist yet: `ARCHITECTURE.md`, `API.md`, `PROVIDERS.md`,
+~~None of the following exist yet: `ARCHITECTURE.md`, `API.md`, `PROVIDERS.md`,
 `GOVERNANCE.md`, `RUNTIME.md`, `WORKERS.md`, `SECURITY.md`, `DEPLOYMENT.md`,
-`CONTRIBUTING.md`, `RELEASE_NOTES.md`. `docs/` currently contains only internal
-milestone/planning notes (`MILESTONE_01..10.md`, `ROADMAP.md`,
-`CODEX_ENGINEERING_PROTOCOL.md`, `PHASE_01_AI_PLATFORM.md`), which read as build-process
-logs rather than user- or contributor-facing docs.
+`CONTRIBUTING.md`, `RELEASE_NOTES.md`~~ — all 10 added this session, at repo root, written
+against the post-fix codebase. `docs/` still contains only internal milestone/planning
+notes (`MILESTONE_01..10.md`, `ROADMAP.md`, `CODEX_ENGINEERING_PROTOCOL.md`,
+`PHASE_01_AI_PLATFORM.md`), which read as build-process logs rather than user- or
+contributor-facing docs — left as-is; they're a different kind of document (internal build
+history) than the new suite, not a duplicate of it.
 
 ## 15. Potential Bugs (beyond the 6 failing tests)
 
@@ -466,9 +468,11 @@ governance gate, a live event stream, working session recovery, an auditable
 order-independent audit log, and a real (if here-unverified-against-a-live-model) AI
 routing path.
 
-**Still NOT READY for a v1.0 tag** — the P4/P5 backlog in `V1_RELEASE_PLAN.md` remains
-open, most notably: none of the 10 user/contributor-facing docs (`ARCHITECTURE.md`,
-`SECURITY.md`, etc.) exist yet (P4-1), and `LiveAIPort`'s live-Ollama happy path needs
-validation against a real running Ollama instance before this is trusted in production
-(P1-4's disclosed limitation). See `V1_RELEASE_PLAN.md` for the full prioritized path and
-current status of each item.
+**Update: the full P0-P5 backlog in `V1_RELEASE_PLAN.md` is now closed** (one item, P1-1,
+was evaluated and explicitly declined with reasoning rather than implemented — see below).
+This includes the 10-doc suite (P4-1). See `V1_RELEASE_REPORT.md` for the final scored
+assessment and release recommendation, which weighs the real, disclosed limitations that
+remain (see `SECURITY.md`) against everything fixed this session — closing the backlog is
+not the same claim as "no limitations remain," and the report does not conflate the two.
+
+See `V1_RELEASE_PLAN.md` for the full prioritized history and final status of every item.

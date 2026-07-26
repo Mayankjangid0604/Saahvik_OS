@@ -364,14 +364,23 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
 
 ## P4 — Documentation
 
-### P4-1 — Write the missing doc suite
+### P4-1 — Write the missing doc suite — ✅ DONE
 - **Reason:** `ARCHITECTURE.md`, `API.md`, `PROVIDERS.md`, `GOVERNANCE.md`, `RUNTIME.md`,
-  `WORKERS.md`, `SECURITY.md`, `DEPLOYMENT.md`, `CONTRIBUTING.md`, `RELEASE_NOTES.md` do not
-  exist. `docs/` currently holds only internal milestone/build logs.
-- **Impact:** No external-facing documentation exists for a "v1.0" release.
-- **Effort:** L (~1-2 days total across all 10 docs) — best done incrementally, one doc per
-  completed subsystem fix (e.g. write `GOVERNANCE.md` right after P0-2 lands, so it
-  describes the real, working flow rather than the aspirational one).
+  `WORKERS.md`, `SECURITY.md`, `DEPLOYMENT.md`, `CONTRIBUTING.md`, `RELEASE_NOTES.md` did
+  not exist. `docs/` holds only internal milestone/build logs.
+- **Impact:** No external-facing documentation existed for a "v1.0" release.
+- **Effort:** L (~1-2 days), actual — done after all code fixes landed, so each doc
+  describes the real, fixed behavior rather than the pre-fix state.
+- **Resolution:** All 10 docs added at repo root, alongside `README.md`/`CURRENT_STATE.md`.
+  Written from the actual, verified current code (cross-referenced against source during
+  writing, not from memory of the audit) — including honest disclosure of real, still-open
+  gaps found in the process of writing them rather than smoothing them over: no proactive
+  risk-based approval gate (`GOVERNANCE.md`), no worker/process isolation
+  (`WORKERS.md`/`SECURITY.md`), no WebSocket auth (`API.md`/`SECURITY.md`), and a live
+  prompt-injection surface now that `LiveAIPort` calls a real model (`SECURITY.md`).
+  **One more small, real bug found and fixed while writing `DEPLOYMENT.md`:** the demo
+  script `drive_ceo.py` imports `requests`, which was never declared as a dependency
+  anywhere in `pyproject.toml` and isn't installed by default — added a `demo` extra.
 
 ---
 
