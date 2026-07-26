@@ -75,8 +75,15 @@ class FileAuditLog(AuditLog):
     def __init__(self, log_dir: str = "logs") -> None:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.logger = logging.getLogger("AuditLog")
+        # A fixed logger name (e.g. "AuditLog") is a process-wide singleton in
+        # Python's logging module: the *first* FileAuditLog instantiated would
+        # win the "if not self.logger.handlers" race and every later instance
+        # would silently keep writing to the first instance's log_dir,
+        # regardless of what log_dir it was constructed with. Scope the logger
+        # name per instance so each FileAuditLog genuinely owns its own file.
+        self.logger = logging.getLogger(f"AuditLog.{id(self)}")
         self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
         if not self.logger.handlers:
             fh = logging.FileHandler(self.log_dir / "audit.log")
             formatter = logging.Formatter('%(message)s') # Timestamp is in the event already

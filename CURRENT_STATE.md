@@ -152,7 +152,7 @@ resolvable entry in `GET /approvals` that the dashboard can act on via
 now bound to the audit log. Covered by
 `test_reasoning_loop_seeks_approval_on_step_failure`.
 
-## 7. Event Flow (✅ two bugs fixed this session — was P1-2 and P0-4)
+## 7. Event Flow (✅ three bugs fixed this session — was P1-2, P0-4, and P1-7)
 
 `EventDispatcher` is a pub/sub (`subscribe(type, handler)` / `dispatch(event)`). Two
 independent sync subscribers exist: `FileAuditLog.log_event` (writes one JSON line per event
@@ -175,6 +175,19 @@ Starlette executes in a worker thread (not the event loop thread), this was a cr
 call into an `asyncio.Queue`, documented as not thread-safe. `broadcast_loop()` now captures
 the running loop and `_handle_event` uses `loop.call_soon_threadsafe(...)` once it's known.
 Covered by a real cross-thread regression test in `tests/unit/interfaces/test_websocket.py`.
+
+**Fixed — `FileAuditLog` instances silently shared one global log destination.**
+`__init__` used a fixed logger name (`"AuditLog"`), a process-wide singleton in Python's
+`logging` module; only the *first* `FileAuditLog` constructed in a process would win the
+`if not self.logger.handlers` check, and every later instance silently reused that first
+instance's handler — writing to *its* `log_dir`, ignoring its own. Found opportunistically
+while adding an unrelated test (`test_ceo_api_auth.py`, for P2-3) that happened to import
+`ceo_api` — which constructs its own `FileAuditLog` — before `test_events_persistence.py`
+ran in collection order, which flipped a previously-always-passing test to failing. Fixed
+by scoping the logger name per instance and setting `propagate = False`. Covered by
+`test_file_audit_log_instances_do_not_share_a_handler`, which constructs two instances
+with different `log_dir`s in the same process and confirms each only contains its own
+events, regardless of construction order.
 
 ## 8. Persistence Flow (✅ fixed — was P0-3 and P1-6)
 
@@ -351,10 +364,13 @@ logs rather than user- or contributor-facing docs.
    is then correctly rejected. Confirmed with a live exploit attempt
    (`test_filesystem_provider_blocks_symlink_escape`) that plants a symlink to an outside
    directory and confirms the read is denied.
-4. No authentication/authorization on any FastAPI endpoint — `/ceo/goal`, `/approvals`,
-   `/approvals/{id}` (approve/reject!) are all unauthenticated. Acceptable for a local
-   single-owner MVP, but worth flagging explicitly as a pre-multi-tenant gap rather than a
-   silent assumption.
+4. ~~No authentication/authorization on any FastAPI endpoint — `/ceo/goal`, `/approvals`,
+   `/approvals/{id}` (approve/reject!) were all unauthenticated~~ — **fixed this session
+   (P2-3).** A `require_api_token` dependency now gates those three governance-sensitive
+   routes, reading an expected bearer token from `ENTERPRISE_OS_API_TOKEN`. Unset is a
+   deliberate, now-documented local single-owner default rather than a silent gap.
+   `/health`, the WebSocket endpoint, and the static dashboard mount remain intentionally
+   ungated.
 5. No input validation on `GoalRequest.description` (free text, unbounded, flows directly
    into an AI prompt) — low risk today since `LiveAIPort` is canned (P1-4), but a real prompt
    injection surface once live inference is wired up.
@@ -408,13 +424,17 @@ own earlier claims turned out to be wrong on re-verification (`dummy_provider.py
 `file_document_loader.py` were both actually in use), corrected in place rather than
 silently dropped. `FileSessionRepository` now round-trips in-flight `plan`/`step` history,
 not just `state`/`memory` (P1-6), so a recovered session resumes at the exact step it was
-on. Suite: **103 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1, 85%). The
-architecture remains sound and the Executive/Worker/Tool loop genuinely works end-to-end
-with a real, resolvable governance gate, a live event stream, and working session recovery.
+on. A second latent audit-integrity bug (`FileAuditLog` instances silently sharing one
+global log destination) was found and fixed opportunistically while adding auth tests
+(P1-7). The three governance-sensitive REST endpoints now require a bearer token when
+`ENTERPRISE_OS_API_TOKEN` is set (P2-3). Suite: **110 passed, 1 skipped, 0 failed, 90%
+coverage** (up from 72/6/1, 85%). The architecture remains sound and the Executive/Worker/
+Tool loop genuinely works end-to-end with a real, resolvable governance gate, a live event
+stream, working session recovery, and an auditable, order-independent audit log.
 
-**Still NOT READY for a v1.0 tag** — the P1/P2/P3/P4/P5 backlog in `V1_RELEASE_PLAN.md`
-remains open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything
-today runs against scripted responses), no endpoint requires authentication (P2-3), and
+**Still NOT READY for a v1.0 tag** — the P3/P4/P5 backlog in `V1_RELEASE_PLAN.md` remains
+open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything today
+runs against scripted responses), no performance baseline has been measured (P3-2), and
 none of the 10 user/contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist
-yet (P4-1). See
-`V1_RELEASE_PLAN.md` for the full prioritized path and current status of each item.
+yet (P4-1). See `V1_RELEASE_PLAN.md` for the full prioritized path and current status of
+each item.

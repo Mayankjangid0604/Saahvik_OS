@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import os
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 from pydantic import BaseModel
-from typing import Any
+from typing import Any, Optional
 
 from enterprise_os.runtime.events import EventDispatcher
 from enterprise_os.runtime.persistence import FileSessionRepository, FileAuditLog
@@ -163,23 +164,35 @@ class ApprovalDecision(BaseModel):
     approved: bool
     feedback: str = ""
 
-@app.post("/ceo/goal")
+# Governance-sensitive endpoints (submitting goals, approving/rejecting pending
+# governance decisions) require a bearer token when ENTERPRISE_OS_API_TOKEN is
+# set. Unset is a deliberate, documented default for local single-owner use
+# (see SECURITY.md) -- not a silent gap: set the env var to require auth.
+API_TOKEN = os.environ.get("ENTERPRISE_OS_API_TOKEN")
+
+async def require_api_token(authorization: Optional[str] = Header(default=None)) -> None:
+    if API_TOKEN is None:
+        return
+    if authorization != f"Bearer {API_TOKEN}":
+        raise HTTPException(status_code=401, detail="Missing or invalid API token.")
+
+@app.post("/ceo/goal", dependencies=[Depends(require_api_token)])
 async def submit_goal(request: GoalRequest, background_tasks: BackgroundTasks):
     goal = Goal(id=request.id, description=request.description, success_criteria="")
     session = ExecutiveSession()
-    
+
     def run_loop():
         reasoning_loop.execute_goal(session, goal)
-        
+
     background_tasks.add_task(run_loop)
     return {"message": "Goal accepted", "session_id": session.id}
 
-@app.get("/approvals")
+@app.get("/approvals", dependencies=[Depends(require_api_token)])
 async def get_approvals():
     pending = approval_engine.get_pending_approvals()
     return {"pending_approvals": pending}
 
-@app.post("/approvals/{approval_id}")
+@app.post("/approvals/{approval_id}", dependencies=[Depends(require_api_token)])
 async def resolve_approval(approval_id: str, decision: ApprovalDecision):
     try:
         approval_engine.resolve_approval(approval_id, decision.approved, decision.feedback)

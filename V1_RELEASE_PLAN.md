@@ -178,6 +178,35 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   mid-`EXECUTING` (one `COMPLETED`, one `IN_PROGRESS`, one `PENDING`) and asserts the
   recovered session's `plan.get_next_step()` resumes at exactly the right step.
 
+### P1-7 — `FileAuditLog` instances silently shared a single global log destination — ✅ FIXED (found while implementing P2-3)
+- **Reason:** `FileAuditLog.__init__` called `logging.getLogger("AuditLog")` — a fixed
+  name, which Python's `logging` module treats as a process-wide singleton — then only
+  attached a `FileHandler` `if not self.logger.handlers`. The *first* `FileAuditLog`
+  constructed in a process wins that check; every subsequently constructed instance in the
+  same process reuses the first one's handler and silently writes to *its* `log_dir`,
+  ignoring whatever `log_dir` it was itself given.
+- **How it was found:** writing `tests/unit/interfaces/test_ceo_api_auth.py` for P2-3
+  imports `enterprise_os.interfaces.api.ceo_api`, which constructs its own `FileAuditLog`
+  pointed at the repo's real `logs/` directory as a module-level side effect. Because that
+  test file sorts before `tests/unit/runtime/test_events_persistence.py` in pytest's
+  collection order, the existing `test_file_audit_log` — previously always run first in
+  isolation and never observed to fail — started failing: its `FileAuditLog(log_dir=str
+  (tmp_path))` silently reused `ceo_api`'s already-registered handler instead of writing to
+  `tmp_path`.
+- **Impact:** This is an audit-integrity bug (explicit security-checklist item), not just a
+  test-ordering artifact. In any real process that constructs more than one `FileAuditLog`
+  — or restarts logging setup during a long-running process — audit events could silently
+  end up in the wrong file, or a later instance's intended `log_dir` could be ignored
+  entirely.
+- **Effort:** S (~1h, found and fixed opportunistically alongside P2-3's ~2-3h).
+- **Resolution:** Scoped the logger name per instance (`f"AuditLog.{id(self)}"` instead of
+  the fixed `"AuditLog"`), so each `FileAuditLog` genuinely owns its own logger and handler
+  regardless of instantiation order elsewhere in the process; also set `propagate = False`
+  so audit lines can't leak into an ancestor logger's handlers. Added
+  `test_file_audit_log_instances_do_not_share_a_handler`, which constructs two
+  `FileAuditLog`s with different `log_dir`s in the same process and asserts each only
+  contains its own events. Full suite re-verified green regardless of collection order.
+
 ---
 
 ## P2 — Security
@@ -227,14 +256,28 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   `test_filesystem_provider_blocks_symlink_escape` plants a symlink to an outside directory
   and confirms the read is denied, since `.resolve()` runs before the containment check.
 
-### P2-3 — Add minimal auth to approval-resolution and goal-submission endpoints
-- **Reason:** `/ceo/goal`, `/approvals/{id}` (approve/reject) are unauthenticated.
-  Acceptable for a local single-owner MVP but should be a documented, deliberate decision,
-  not a silent gap, before calling this v1.0.
-- **Impact:** Anyone with network access to the API can submit goals or approve/reject
+### P2-3 — Add minimal auth to approval-resolution and goal-submission endpoints — ✅ FIXED
+- **Reason:** `/ceo/goal`, `/approvals`, `/approvals/{id}` (approve/reject) were
+  unauthenticated. Acceptable for a local single-owner MVP but needed to be a documented,
+  deliberate decision, not a silent gap, before calling this v1.0.
+- **Impact:** Anyone with network access to the API could submit goals or approve/reject
   pending governance decisions on the owner's behalf.
-- **Effort:** M (~2-3h) for a simple shared-secret/bearer-token gate; document as a known
-  limitation if deferred rather than silently shipped.
+- **Effort:** M (~2-3h).
+- **Resolution:** Added a `require_api_token` FastAPI dependency gating `POST /ceo/goal`,
+  `GET /approvals`, and `POST /approvals/{approval_id}` — the three governance-sensitive
+  routes named in the original finding. `/health`, the WebSocket endpoint, and the static
+  dashboard mount are intentionally left ungated (health checks and static assets don't
+  need auth; WebSocket auth is a separate, larger concern not in this item's scope). Reads
+  an expected token from `ENTERPRISE_OS_API_TOKEN`; if unset, auth is a no-op — a
+  deliberate, now-documented default for local single-owner use, not a silent gap. When
+  set, requests must send `Authorization: Bearer <token>` or get a 401. Added
+  `tests/unit/interfaces/test_ceo_api_auth.py` (6 tests): the dependency's allow/reject
+  logic in both auth-disabled and auth-enabled modes, plus a test that inspects the actual
+  FastAPI route table to confirm the dependency is wired onto exactly the three intended
+  routes (not just defined and unused).
+- **Found opportunistically while implementing this (see P1-7 below):** writing this test
+  file — which imports `ceo_api` for the first time in the test suite's collection order —
+  exposed a real, separate audit-integrity bug in `FileAuditLog`.
 
 ---
 

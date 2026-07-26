@@ -98,13 +98,39 @@ def test_file_audit_log(tmp_path: Path):
     dispatcher = EventDispatcher()
     audit = FileAuditLog(log_dir=str(tmp_path))
     audit.bind_to(dispatcher, [GoalCreated])
-    
+
     evt = GoalCreated(session_id="s2", goal_id="g2", description="Audit Desc")
     dispatcher.dispatch(evt)
-    
+
     log_file = tmp_path / "audit.log"
     assert log_file.exists()
     with open(log_file, "r") as f:
         content = f.read()
         assert "GoalCreated" in content
         assert "Audit Desc" in content
+
+def test_file_audit_log_instances_do_not_share_a_handler(tmp_path: Path):
+    """Regression test: FileAuditLog used a fixed logger name ("AuditLog"),
+    which is a process-wide singleton in the logging module. The first
+    instance created in the process would win the "if not handlers" guard,
+    and every later instance would silently write to *that* instance's
+    log_dir regardless of its own -- confirmed by importing ceo_api (which
+    constructs its own FileAuditLog first) before this test previously made
+    it fail."""
+    dispatcher_a = EventDispatcher()
+    dir_a = tmp_path / "a"
+    audit_a = FileAuditLog(log_dir=str(dir_a))
+    audit_a.bind_to(dispatcher_a, [GoalCreated])
+
+    dispatcher_b = EventDispatcher()
+    dir_b = tmp_path / "b"
+    audit_b = FileAuditLog(log_dir=str(dir_b))
+    audit_b.bind_to(dispatcher_b, [GoalCreated])
+
+    dispatcher_a.dispatch(GoalCreated(session_id="sa", goal_id="ga", description="A"))
+    dispatcher_b.dispatch(GoalCreated(session_id="sb", goal_id="gb", description="B"))
+
+    log_a = (dir_a / "audit.log").read_text()
+    log_b = (dir_b / "audit.log").read_text()
+    assert "ga" in log_a and "gb" not in log_a
+    assert "gb" in log_b and "ga" not in log_b
