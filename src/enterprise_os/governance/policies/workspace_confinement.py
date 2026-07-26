@@ -20,7 +20,7 @@ class WorkspaceConfinementPolicy(Policy):
             return True, "" # Leave argument validation to the provider
             
         target_path = (self.workspace_root / path).resolve()
-        if not str(target_path).startswith(str(self.workspace_root)):
+        if not target_path.is_relative_to(self.workspace_root):
             return False, f"Access denied: path '{path}' is outside the workspace root."
             
         return True, ""

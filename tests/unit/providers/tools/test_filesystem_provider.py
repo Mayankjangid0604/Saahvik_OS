@@ -32,3 +32,37 @@ def test_filesystem_provider_security(tmp_path: Path):
 
     assert resp.success is False
     assert "Access denied" in resp.error_message
+
+def test_filesystem_provider_blocks_sibling_directory_with_overlapping_prefix(tmp_path: Path):
+    """Regression test: str(target).startswith(str(root)) incorrectly let a
+    'workspace-evil' sibling through a 'workspace' root check (confirmed
+    exploitable before the fix to Path.is_relative_to())."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    evil = tmp_path / "workspace-evil"
+    evil.mkdir()
+    (evil / "secret.txt").write_text("leaked")
+
+    provider = FilesystemProvider(workspace_root=str(workspace))
+    resp = provider.execute(ToolRequest(tool_name="FILE_READ", arguments={"path": "../workspace-evil/secret.txt"}))
+
+    assert resp.success is False
+    assert "Access denied" in resp.error_message
+
+def test_filesystem_provider_blocks_symlink_escape(tmp_path: Path):
+    """A symlink planted inside the workspace pointing outside it must not be
+    followed to leak files: _resolve_safe_path() calls .resolve() (which
+    follows symlinks) before the containment check, so the resolved target
+    correctly lands outside workspace_root and is rejected."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("leaked-via-symlink")
+    (workspace / "escape").symlink_to(outside)
+
+    provider = FilesystemProvider(workspace_root=str(workspace))
+    resp = provider.execute(ToolRequest(tool_name="FILE_READ", arguments={"path": "escape/secret.txt"}))
+
+    assert resp.success is False
+    assert "Access denied" in resp.error_message

@@ -317,17 +317,27 @@ logs rather than user- or contributor-facing docs.
    isolation) or turning the tool into a fixed-command allowlist, which would change what
    the tool is for — out of scope for a hardening pass per this release's "do not redesign
    architecture" constraint. Documented here so it isn't mistaken for solved.
-2. `WorkspaceConfinementPolicy` and `FilesystemProvider._resolve_safe_path()` both do
-   `str(target).startswith(str(root))` for containment checks — this is a known-fragile
-   pattern (a sibling directory `workspace-evil/` passes a `startswith("workspace")` check
-   against root `workspace`). In this codebase root and target are both `Path.resolve()`d
-   first and the check is against the *root itself* not a sibling, so it is not currently
-   exploitable, but it should use `Path.is_relative_to()` (Python 3.9+) for correctness and
-   auditability rather than string prefix matching.
-3. No symlink handling: `_resolve_safe_path` calls `.resolve()` which follows symlinks, so a
-   symlink planted inside the workspace pointing outside it would resolve outside the root
-   and then correctly be rejected by the prefix check — this one is actually fine, confirmed
-   by tracing the resolve() + startswith() order.
+2. ~~`WorkspaceConfinementPolicy` and `FilesystemProvider._resolve_safe_path()` both do
+   `str(target).startswith(str(root))` for containment checks~~ — **fixed this session, and
+   this finding was under-stated at first pass.** The initial version of this audit claimed
+   "it is not currently exploitable" based on reading the code, without testing it — that
+   was wrong. It was tested directly (root `.../workspace`, a sibling `.../workspace-evil/
+   secret.txt`) and confirmed to actually leak the sibling file's contents through
+   `FilesystemProvider.execute()` before the fix: `"/workspace-evil/secret.txt".startswith
+   ("/workspace")` is `True` in plain string terms, since `startswith` doesn't respect path
+   boundaries. Both call sites now use `Path.is_relative_to()`. Added
+   `tests/unit/governance/test_workspace_confinement_policy.py` (new — this policy had zero
+   prior tests) and a matching regression test in `test_filesystem_provider.py`, both
+   confirming the sibling-prefix bypass is closed. **Lesson applied:** every other security
+   claim in this document that says "not exploitable" without a cited test should be treated
+   with the same skepticism until verified the same way — reasoning about code without
+   running it against the case in question is not a substitute for testing it.
+3. Symlink escape — **verified safe by test, not just by reading the code** (see the
+   correction above): a symlink planted inside the workspace pointing outside it resolves
+   (via `.resolve()`, called before the containment check) to the real outside path, which
+   is then correctly rejected. Confirmed with a live exploit attempt
+   (`test_filesystem_provider_blocks_symlink_escape`) that plants a symlink to an outside
+   directory and confirms the read is denied.
 4. No authentication/authorization on any FastAPI endpoint — `/ceo/goal`, `/approvals`,
    `/approvals/{id}` (approve/reject!) are all unauthenticated. Acceptable for a local
    single-owner MVP, but worth flagging explicitly as a pre-multi-tenant gap rather than a
@@ -375,9 +385,13 @@ stream, which was silently completely dead due to an exact-type-matching bug in
 step that actually executes — it now fails loud and correctly resolves to a queued approval
 (P1-3). The shell command policy has been hardened against every blocklist-bypass class
 found in the audit (P2-1), with a documented, honest residual limitation rather than an
-overclaimed fix. Suite: **96 passed, 1 skipped, 0 failed, 87% coverage** (up from 72/6/1,
-85%). The architecture remains sound and the Executive/Worker/Tool loop genuinely works
-end-to-end with a real, resolvable governance gate and a live event stream.
+overclaimed fix. A real, working path-traversal bypass of workspace confinement (via a
+`workspace-evil`-style sibling directory) was found, tested, and fixed — this was actually
+more severe than the original audit pass judged it to be, since that pass reasoned about
+exploitability without testing it (P2-2). Suite: **102 passed, 1 skipped, 0 failed, 87%
+coverage** (up from 72/6/1, 85%). The architecture remains sound and the Executive/Worker/
+Tool loop genuinely works end-to-end with a real, resolvable governance gate and a live
+event stream.
 
 **Still NOT READY for a v1.0 tag** — the P1/P2/P3/P4/P5 backlog in `V1_RELEASE_PLAN.md`
 remains open, most notably: `LiveAIPort` still never calls a real model (P1-4, everything

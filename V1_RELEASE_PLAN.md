@@ -181,14 +181,25 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   identified in the audit (extra whitespace, absolute path, `&&`/`;`/`||`/`|`-chained,
   substitution) are now correctly blocked.
 
-### P2-2 — Switch path-containment checks to `Path.is_relative_to()`
+### P2-2 — Switch path-containment checks to `Path.is_relative_to()` — ✅ FIXED
 - **Reason:** `WorkspaceConfinementPolicy` and `FilesystemProvider._resolve_safe_path()`
-  both use `str(target).startswith(str(root))`, a string-prefix pattern that's fragile even
-  though it isn't currently exploitable here (verified during audit).
-- **Impact:** Low active risk today, but this is exactly the kind of check that becomes
-  exploitable after an unrelated refactor. Cheap to harden now.
-- **Effort:** S (~1h) across both call sites, plus a regression test for the sibling-directory
-  case (`workspace-evil/` vs `workspace/`).
+  both used `str(target).startswith(str(root))`, a string-prefix pattern.
+- **Impact:** **Higher than originally assessed.** The initial audit pass judged this "not
+  currently exploitable" from reading the code alone. That was wrong: tested directly with
+  a `workspace` root and a `workspace-evil` sibling directory, and confirmed
+  `FilesystemProvider.execute()` actually leaked the sibling file's contents before the fix
+  — `"/workspace-evil/secret.txt".startswith("/workspace")` is `True` in plain string
+  terms. This was a real, working path-traversal bypass of workspace confinement, not a
+  theoretical one.
+- **Effort:** S (~1h).
+- **Resolution:** Both call sites now use `Path.is_relative_to()`. Added
+  `tests/unit/governance/test_workspace_confinement_policy.py` (new — this policy had zero
+  prior tests) and `test_filesystem_provider_blocks_sibling_directory_with_overlapping_prefix`,
+  both confirming the bypass is closed. Also verified the adjacent symlink-escape claim
+  from the original audit with an actual exploit attempt rather than leaving it as an
+  unverified "confirmed by tracing the code" note — it holds:
+  `test_filesystem_provider_blocks_symlink_escape` plants a symlink to an outside directory
+  and confirms the read is denied, since `.resolve()` runs before the containment check.
 
 ### P2-3 — Add minimal auth to approval-resolution and goal-submission endpoints
 - **Reason:** `/ceo/goal`, `/approvals/{id}` (approve/reject) are unauthenticated.
