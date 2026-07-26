@@ -42,6 +42,12 @@ policy to gate both tool names. See `GOVERNANCE.md`.
 authentication, and zero policy enforcement — unreferenced by any import, test, script, or
 doc anywhere in the repository. Deleted; see `TECHNICAL_DEBT.md`.
 
+**Local file disclosure / SSRF via `BrowserProvider` (round 2).** The `url` argument was
+passed straight to `urllib.request.urlopen()` with no scheme check. Reproduced live: a
+`file://` URL let the tool read arbitrary local files and return their contents as the tool
+result. Fixed with an http(s)-only scheme allowlist — a complete fix for this class of
+issue, unlike the `PYTHON_EXECUTE` situation below. See `SECURITY_AUDIT.md` SEC-17.
+
 **No API authentication → bearer-token gate.** `/ceo/goal`, `/approvals`, and
 `/approvals/{id}` (approve/reject!) were completely unauthenticated. Now gated by
 `require_api_token` when `ENTERPRISE_OS_API_TOKEN` is set. See `API.md`.

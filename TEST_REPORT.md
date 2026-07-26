@@ -4,18 +4,18 @@
 
 | | Before this session (baseline) | After round 1 | After round 2 |
 |---|---|---|---|
-| Passed | 72 | 115 | 124 |
+| Passed | 72 | 115 | 128 |
 | Failed | 6 | 0 | 0 |
 | Skipped | 1 | 1 | 1 |
 | Line coverage | 85% | 91% | 92% |
-| Test files | ~48 | 52 | 53 |
+| Test files | ~48 | 52 | 54 |
 | Full suite wall time | ~3.6s (unconditional sleep bug) | ~0.6s | ~0.7–1.0s |
 
 **Flakiness check**: the full suite was run 3 times consecutively as part of this report —
-124 passed / 1 skipped / 0 failed every time, with no test-order dependency observed (the
-suite runs in pytest's default collection order, not randomized, but round 2 specifically
-found and fixed a real order-dependent bug — see below — so order-independence was verified,
-not assumed).
+124 passed / 1 skipped / 0 failed every time (before the final `BrowserProvider` fix added 4
+more), with no test-order dependency observed (the suite runs in pytest's default collection
+order, not randomized, but round 2 specifically found and fixed a real order-dependent bug —
+see below — so order-independence was verified, not assumed).
 
 **The one skipped test** (`tests/unit/test_forbidden_milestone_scope.py`) is intentionally
 skipped by the codebase itself: `@pytest.mark.skip(reason="We are in Phase 07: Real Product
@@ -61,6 +61,9 @@ Every test added in round 2 reproduces a specific, real finding — none are spe
   bug it's now guarding against — a genuine order/lifetime-dependent regression test, not a
   restatement of the fix.
 - `test_file_audit_log_close_releases_its_handler` — covers the new `close()` capability.
+- `tests/unit/providers/tools/test_browser_provider.py` (4 tests, new file — this provider
+  had zero prior tests) — reproduces the `file://` local-file-disclosure fix (SEC-17),
+  rejects other non-http(s) schemes, and confirms normal `https` usage still works.
 
 ## Test categories present vs. absent (mission's testing checklist, evaluated honestly)
 

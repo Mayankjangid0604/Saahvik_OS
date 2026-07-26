@@ -30,7 +30,7 @@ a capability enum, a registry, a router, and self-registering concrete implement
 | `ShellProvider` | `SHELL_EXECUTE` | `subprocess.run(shell=True)`; gated by `CommandRestrictionPolicy` (see `GOVERNANCE.md`). |
 | `PythonProvider` | `PYTHON_EXECUTE` | Executes Python scripts. |
 | `GitProvider` | `GIT_EXECUTE` | Git command execution via `subprocess.run(shell=True)`; gated by `CommandRestrictionPolicy` alongside `SHELL_EXECUTE` (round-2 fix — see `SECURITY.md`; previously ungated). |
-| `BrowserProvider` | `BROWSER_NAVIGATE`, `BROWSER_CLICK`, `BROWSER_READ` | Browser automation. |
+| `BrowserProvider` | `BROWSER_NAVIGATE`, `BROWSER_READ` | Fetches a URL's content via `urllib`; restricted to `http`/`https` schemes (round-2 fix — see `SECURITY.md`; previously any scheme, including `file://`, was allowed). Note: `ToolCapability.BROWSER_CLICK` exists as an enum member but no provider implements it — round 1's version of this table incorrectly listed it as one of `BrowserProvider`'s capabilities; corrected. |
 
 A `ToolRequest.tool_name` is always the enum member's `.name` (e.g. `"FILE_READ"`), set by
 whichever `ToolPort` implementation constructs the request (`LiveToolPort`/

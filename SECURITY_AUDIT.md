@@ -96,6 +96,27 @@ enforcement, unreferenced anywhere in the repo. An unreferenced-but-present, una
 mocked "CEO API" is itself a liability if ever accidentally deployed. Deleted (see
 `TECHNICAL_DEBT.md`).
 
+### SEC-17 (round 2, high) — Local file disclosure / SSRF via `BrowserProvider`
+`BrowserProvider.execute()` passed `request.arguments["url"]` straight to
+`urllib.request.urlopen()` with zero scheme validation. Found via `ruff check --select S310`.
+**Reproduced live**: a `file://` URL let the tool read an arbitrary local file (confirmed
+reading `/etc/hostname`) and return its contents as the tool result — also a classic SSRF
+vector via other schemes (e.g. reaching internal-network or cloud-metadata endpoints).
+Fixed with an http(s)-only scheme allowlist checked before opening the URL. Unlike SEC-11
+(`PYTHON_EXECUTE`), this is a **complete** fix, not a partial one: there's no equivalent to
+Python's introspection-based blocklist evasion for a URL's literal scheme string. Not
+currently reachable through the live `ReasoningLoop` (its `allowed_tools` excludes browser
+capabilities), but reachable by anything calling the tool port directly, and no governance
+policy covers `BROWSER_NAVIGATE`/`BROWSER_READ` either — fixed at the provider level. Added
+`tests/unit/providers/tools/test_browser_provider.py` (this provider had zero prior tests).
+
+**Related, reviewed, not changed:** the same `S310` rule also flags 6 `urlopen()` call sites
+in `ollama_client.py`. Reviewed and left as-is: `OllamaClient`'s `base_url` is only ever
+constructed from a hardcoded default (`ceo_api.py:167`, `OllamaClient()` with no arguments)
+— no request- or tool-controlled input reaches it anywhere in the codebase, so unlike
+`BrowserProvider`'s directly argument-controlled `url`, there is no reproducible exploit
+path here to fix.
+
 ## Findings — Open, disclosed, not silently accepted
 
 ### SEC-11 (high, by design not oversight) — `PYTHON_EXECUTE` has zero policy coverage
@@ -166,6 +187,7 @@ irrelevant to the project's actual supply chain.
 | SEC-8 embed() missing validation | Low | ✅ Fixed |
 | SEC-9 Silent exception swallowing | Low | ✅ Fixed |
 | SEC-10 Orphaned ungoverned API | Medium | ✅ Fixed (deleted) |
+| SEC-17 Local file disclosure / SSRF (BrowserProvider) | High | ✅ Fixed |
 | SEC-11 PYTHON_EXECUTE unrestricted | High | ⚠ Disclosed, not fixed (fake fix would be worse) |
 | SEC-12 Shell blocklist residual scope | Medium | ⚠ Disclosed, by design |
 | SEC-13 No WebSocket auth | Low | ⚠ Disclosed, out of scope |
