@@ -395,14 +395,22 @@ logs rather than user- or contributor-facing docs.
    note that no longer reflects reality. A reasonable follow-up: length-cap the field and/or
    document that goal descriptions are trusted-owner input, not arbitrary third-party text.
 
-## 17. Performance Notes (measured/observed, not yet load-tested)
+## 17. Performance Notes (baseline measured this session — was P3-2)
 
 - ~~`time.sleep(0.5)` per reasoning-loop iteration~~ — removed this session (P3-1); measured
   full-suite wall time dropped from ~3.6s to ~0.6s.
 - `ToolRouter.route()` and `ToolRegistry.auto_discover()` are linear scans over small
   in-memory lists — not a bottleneck at current scale, no action needed.
-- No caching observed between AI capability requests, no batching — not measured under load
-  since there's no load-testing harness yet (see V1_RELEASE_PLAN P3 items).
+- ~~No caching observed between AI capability requests, no batching — not measured under
+  load since there's no load-testing harness yet~~ — a real baseline harness now exists
+  (`scripts/perf_baseline.py`, stdlib-only, no new dependencies). Every in-process
+  operation (routing, planning, serialization, event dispatch) measured sub-millisecond;
+  startup is ~123ms and dominated by Python import time. API/dashboard latency were
+  measured against a real local `uvicorn` instance the script actually starts (`/health`
+  ~0.95ms mean, `/` ~2.17ms mean), not simulated. Full numbers and reading notes are in
+  `V1_RELEASE_PLAN.md` (P3-2) rather than duplicated here. AI routing latency in this
+  baseline reflects the graceful-degradation path only (no Ollama server reachable here) —
+  real inference latency is a separate, much larger cost this environment cannot measure.
 
 ## 18. Dependency Graph (updated — was stale on two edges fixed this session)
 
@@ -458,9 +466,9 @@ governance gate, a live event stream, working session recovery, an auditable
 order-independent audit log, and a real (if here-unverified-against-a-live-model) AI
 routing path.
 
-**Still NOT READY for a v1.0 tag** — the P3/P4/P5 backlog in `V1_RELEASE_PLAN.md` remains
-open, most notably: no performance baseline has been measured (P3-2), none of the 10 user/
-contributor-facing docs (`ARCHITECTURE.md`, `SECURITY.md`, etc.) exist yet (P4-1), and
-`LiveAIPort`'s live-Ollama happy path needs validation against a real running Ollama
-instance before this is trusted in production (P1-4's disclosed limitation). See
-`V1_RELEASE_PLAN.md` for the full prioritized path and current status of each item.
+**Still NOT READY for a v1.0 tag** — the P4/P5 backlog in `V1_RELEASE_PLAN.md` remains
+open, most notably: none of the 10 user/contributor-facing docs (`ARCHITECTURE.md`,
+`SECURITY.md`, etc.) exist yet (P4-1), and `LiveAIPort`'s live-Ollama happy path needs
+validation against a real running Ollama instance before this is trusted in production
+(P1-4's disclosed limitation). See `V1_RELEASE_PLAN.md` for the full prioritized path and
+current status of each item.

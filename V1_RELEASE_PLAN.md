@@ -321,13 +321,44 @@ Scoring context: 79 tests / 85% coverage / 6 failing at audit time.
   out to be wanted after live model wiring lands (P1-4), that should be a deliberate,
   documented, configurable choice — not a silent unconditional sleep.
 
-### P3-2 — Add a minimal performance baseline harness
+### P3-2 — Add a minimal performance baseline harness — ✅ DONE
 - **Reason:** The mission asks to measure startup/planning/worker-creation/routing/API
-  latency, and none of that is currently measured anywhere in the repo.
+  latency, and none of that was measured anywhere in the repo.
 - **Impact:** Without a baseline, "performance improved" can't be substantiated.
-- **Effort:** M (~3h): a small pytest-benchmark or manual timing script covering the
-  metrics named in the mission brief, run against the (currently scripted) AI path so it's
-  deterministic.
+- **Effort:** M (~3h), actual.
+- **Resolution:** Added `scripts/perf_baseline.py` — a manual timing script (deliberately
+  not a pytest suite: performance numbers are environment-dependent and shouldn't be
+  asserted as hard pass/fail gates in CI), using only stdlib (`time`, `statistics`,
+  `subprocess`, `urllib.request`) and the project's own `uvicorn` dependency, no new
+  dependencies added. Covers every metric named in the mission brief, including API and
+  dashboard latency measured against a real local `uvicorn` instance actually started by
+  the script (not simulated). Actual results from this environment (no live Ollama
+  backend — AI routing exercises the graceful-degradation path from P1-4, not live
+  inference):
+
+  | Operation | Mean | Median | p95 | n |
+  |---|---|---|---|---|
+  | Startup (cold import, subprocess) | 122.53ms | — | — | 1 |
+  | AI routing (route + degrade, no model registered) | 0.0041ms | 0.0031ms | 0.0045ms | 200 |
+  | Planning (`_create_plan`) | 0.0170ms | 0.0140ms | 0.0266ms | 200 |
+  | Worker creation (`WorkItem`) | 0.0011ms | 0.0011ms | 0.0017ms | 1000 |
+  | Tool routing (`ToolRouter.route`) | 0.0011ms | 0.0011ms | 0.0011ms | 1000 |
+  | Serialization — save | 0.2515ms | 0.2077ms | 0.3270ms | 500 |
+  | Serialization — load | 0.0394ms | 0.0332ms | 0.0662ms | 500 |
+  | Event dispatch | 0.0004ms | 0.0004ms | 0.0007ms | 2000 |
+  | API latency (`GET /health`) | 0.9534ms | 0.9585ms | 1.1974ms | 50 |
+  | Dashboard latency (`GET /`) | 2.1703ms | 1.9278ms | 2.5266ms | 50 |
+
+  **Reading these honestly:** every in-process operation (routing, planning, serialization,
+  event dispatch) is sub-millisecond and not a concern at current scale — none of these are
+  bottlenecks worth optimizing pre-v1.0. Startup (~123ms) is dominated by Python import
+  time, not application logic. AI routing here measures the *degradation* path (no model
+  registered), not real inference latency — that number will be dominated entirely by
+  actual model response time once run against a live Ollama backend, which is a
+  fundamentally different (and much larger) cost this harness cannot measure without one.
+  Nothing here indicates a performance problem; the value of this baseline is having a
+  repeatable script and real numbers to compare future changes against, not a "problem
+  found and fixed."
 
 ---
 
