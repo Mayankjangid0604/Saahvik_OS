@@ -1,9 +1,12 @@
 import json
 import asyncio
+import logging
 from typing import Any
 from fastapi import WebSocket
 from enterprise_os.runtime.events import EventDispatcher, Event
 import dataclasses
+
+logger = logging.getLogger(__name__)
 
 class EventStreamer:
     def __init__(self, dispatcher: EventDispatcher):
@@ -32,7 +35,7 @@ class EventStreamer:
             else:
                 self._queue.put_nowait(message)
         except Exception:
-            pass
+            logger.warning("Failed to enqueue event %s for WebSocket broadcast; dropping it.", type(event).__name__, exc_info=True)
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -50,4 +53,5 @@ class EventStreamer:
                 try:
                     await connection.send_text(message)
                 except Exception:
+                    logger.debug("WebSocket send failed; disconnecting client.", exc_info=True)
                     self.disconnect(connection)

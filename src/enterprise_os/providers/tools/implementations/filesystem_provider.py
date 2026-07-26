@@ -23,6 +23,7 @@ class FilesystemProvider(ToolProvider):
         start_time = time.time()
         
         try:
+            result: str | list[str]
             if request.tool_name == "FILE_READ":
                 result = self._read_file(request.arguments.get("path", ""))
             elif request.tool_name == "FILE_WRITE":

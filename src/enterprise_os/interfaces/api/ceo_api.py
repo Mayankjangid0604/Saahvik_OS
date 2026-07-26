@@ -1,3 +1,4 @@
+import logging
 import os
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 from pydantic import BaseModel
@@ -28,6 +29,8 @@ from enterprise_os.providers.tools.response import ToolResponse
 from enterprise_os.providers.tools.request import ToolRequest
 from enterprise_os.providers.tools.exceptions import ToolNotFoundError
 from enterprise_os.providers.tools.capability import ToolCapability
+
+logger = logging.getLogger(__name__)
 
 class LiveAIPort(AIPort):
     """Routes capability requests through the real AIRouter/ModelRegistry to
@@ -81,7 +84,7 @@ class LiveToolPort(ToolPort):
     def __init__(self, router: ToolRouter):
         self.router = router
 
-    def execute_tool(self, capability: ToolCapability, arguments: dict[str, Any] = None) -> ToolResponse:
+    def execute_tool(self, capability: ToolCapability, arguments: Optional[dict[str, Any]] = None) -> ToolResponse:
         try:
             provider = self.router.route(capability)
             req = ToolRequest(tool_name=capability.name, arguments=arguments or {})
@@ -98,7 +101,7 @@ class PolicyEnforcedToolPort(ToolPort):
         self.base = base_port
         self.engine = policy_engine
 
-    def execute_tool(self, capability: ToolCapability, arguments: dict[str, Any] = None) -> ToolResponse:
+    def execute_tool(self, capability: ToolCapability, arguments: Optional[dict[str, Any]] = None) -> ToolResponse:
         import time
         req = ToolRequest(tool_name=capability.name, arguments=arguments or {})
         approved, reason = self.engine.evaluate(req)
@@ -127,10 +130,15 @@ audit_log.bind_to(dispatcher, [
 ])
 
 event_streamer = EventStreamer(dispatcher)
+_broadcast_task: Optional[asyncio.Task] = None
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(event_streamer.broadcast_loop())
+    global _broadcast_task
+    # A reference must be kept to the task returned by create_task(), or it
+    # can be garbage-collected mid-execution (a documented asyncio gotcha) --
+    # silently killing the WebSocket dashboard's event stream with no error.
+    _broadcast_task = asyncio.create_task(event_streamer.broadcast_loop())
 
 @app.websocket("/ceo/events/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -163,7 +171,7 @@ try:
     for model in ollama.discover_models():
         ai_registry.register_model(model)
 except Exception:
-    pass
+    logger.warning("Ollama model discovery/registration failed at startup; continuing with no models registered.", exc_info=True)
 ai_router = AIRouter(ai_registry, ai_config)
 live_ai_port = LiveAIPort(ai_router, ai_registry)
 
@@ -217,14 +225,11 @@ async def resolve_approval(approval_id: str, decision: ApprovalDecision):
         approval_engine.resolve_approval(approval_id, decision.approved, decision.feedback)
         return {"message": "Approval resolved"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-        
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
-from fastapi.staticfiles import StaticFiles
-import os
 
 web_dir = os.path.join(os.path.dirname(__file__), "..", "web")
 app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")

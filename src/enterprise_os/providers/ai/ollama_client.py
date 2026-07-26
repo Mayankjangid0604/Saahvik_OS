@@ -1,6 +1,6 @@
 import json
 import urllib.request
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 class OllamaClient:
     def __init__(self, base_url: str = "http://127.0.0.1:11434") -> None:
@@ -23,7 +23,7 @@ class OllamaClient:
         with urllib.request.urlopen(req, timeout=10) as response:
             return json.loads(response.read().decode('utf-8'))
 
-    def generate(self, model: str, prompt: str, system: str = "", options: Dict[str, Any] = None) -> Dict[str, Any]:
+    def generate(self, model: str, prompt: str, system: str = "", options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         payload = {
             "model": model,
             "prompt": prompt,
@@ -34,7 +34,7 @@ class OllamaClient:
             payload["options"] = options
         return self._post("api/generate", payload)
         
-    def chat(self, model: str, messages: list[dict[str, str]], options: Dict[str, Any] = None) -> Dict[str, Any]:
+    def chat(self, model: str, messages: list[dict[str, str]], options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         payload = {
             "model": model,
             "messages": messages,
