@@ -26,7 +26,12 @@ its real, out-of-bounds target and is correctly rejected).
 
 ### `CommandRestrictionPolicy`
 
-Applies only to `SHELL_EXECUTE` requests. **v1.0 change:** rewritten from a plain substring
+Applies to both `SHELL_EXECUTE` and `GIT_EXECUTE` requests. **Round-2 fix:** `GitProvider`
+runs its `command` argument through `subprocess.run(shell=True, ...)` exactly like
+`ShellProvider` does, but this policy originally only ever inspected `SHELL_EXECUTE`
+requests — a full, unguarded bypass of the same injection surface, found via `ruff check
+--select S602` and reproduced live before fixing (see `SECURITY_AUDIT.md` SEC-1). Both tool
+names now share the same gate. **v1.0 change (round 1):** rewritten from a plain substring
 blocklist (`if "sudo" in command`) to an argv-aware one: the command is split on
 `;`/`&&`/`||`/`|` into the sub-commands it could actually invoke, each parsed with
 `shlex.split()`, and the *actual invoked executable name* (path-stripped) is checked against

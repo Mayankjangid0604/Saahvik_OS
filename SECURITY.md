@@ -2,9 +2,11 @@
 
 This document is the honest, evidence-based security posture of EnterpriseOS v1.0 — what
 was verified, what was fixed, and what remains a real, disclosed limitation rather than an
-overclaimed non-issue. Everything below traces to `CURRENT_STATE.md`/`V1_RELEASE_PLAN.md`,
-where the underlying investigation (including two cases where an earlier claim in this
-project's own audit turned out to be wrong on actual testing) is recorded in full.
+overclaimed non-issue. It has been through two hardening passes now; the underlying
+investigation for every item below (including cases where an earlier claim in this
+project's own audit turned out to be wrong on actual testing) is recorded in full in
+[`SECURITY_AUDIT.md`](SECURITY_AUDIT.md), which is the definitive working record — this
+file is the operator-facing summary.
 
 ## Fixed in v1.0
 
@@ -27,6 +29,19 @@ allowed one. Now parses each `;`/`&&`/`||`/`|`-separated segment with `shlex` an
 actual invoked executable name; rejects command substitution (`$(...)`/backticks) outright.
 **This is still a blocklist, not a sandbox — see "Known, disclosed limitations" below.**
 
+**`GIT_EXECUTE` fully bypassed the above (round 2).** `GitProvider` runs its `command`
+argument through `subprocess.run(shell=True, ...)` exactly like `ShellProvider`, but
+`CommandRestrictionPolicy` originally only ever checked `SHELL_EXECUTE` requests — a
+complete, unguarded duplicate of the same injection surface. Found via static analysis
+(`ruff check --select S602`) and reproduced live: a command blocked when routed as
+`SHELL_EXECUTE` sailed through unchecked when routed as `GIT_EXECUTE`. Fixed by widening the
+policy to gate both tool names. See `GOVERNANCE.md`.
+
+**An orphaned, fully ungoverned third API surface existed and was deleted (round 2).**
+`interfaces/api/main.py` was a separate FastAPI app with hardcoded/mocked responses, zero
+authentication, and zero policy enforcement — unreferenced by any import, test, script, or
+doc anywhere in the repository. Deleted; see `TECHNICAL_DEBT.md`.
+
 **No API authentication → bearer-token gate.** `/ceo/goal`, `/approvals`, and
 `/approvals/{id}` (approve/reject!) were completely unauthenticated. Now gated by
 `require_api_token` when `ENTERPRISE_OS_API_TOKEN` is set. See `API.md`.
@@ -45,6 +60,18 @@ API depend on was never populated by real execution. See `GOVERNANCE.md`.
 
 ## Known, disclosed limitations (not fixed — stated plainly, not hidden)
 
+- **`PYTHON_EXECUTE` has zero policy coverage at all (round 2, high severity, deliberate).**
+  Reproduced live: `PolicyEngine.evaluate()` approves a `PYTHON_EXECUTE` request whose script
+  is `"import os; os.system('rm -rf /tmp/x')"` unconditionally. `PythonProvider` executes
+  arbitrary Python, which is at least as powerful as unrestricted shell access. **This was
+  not given a blocklist-style fix on purpose**: unlike shell commands, Python source is
+  trivially able to defeat string/AST-based blocklisting via its own introspection
+  (`__import__('o'+'s')`, dynamic `getattr` on builtins, etc.), so a naive check would create
+  a false sense of security while adding real complexity and false positives — assessed as
+  worse than no check at all. A real fix requires actual sandboxing (a restricted execution
+  environment or container/seccomp isolation), out of scope for a hardening pass explicitly
+  instructed not to redesign the architecture. See `SECURITY_AUDIT.md` SEC-11 for the full
+  reasoning.
 - **`CommandRestrictionPolicy` is an executable-name blocklist, not a full shell sandbox.**
   `curl ... | sh`, `python -c "import os; os.remove(...)"`, or any destructive action
   performed through a generically "safe" interpreter is still possible. Closing this would

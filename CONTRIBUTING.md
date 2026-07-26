@@ -10,8 +10,20 @@ pytest
 ```
 
 `pyproject.toml`'s `dev` extra installs `pytest`/`pytest-cov` — everything needed to run the
-test suite. There is no linter or type-checker configured in this repository today (no
-`ruff`/`mypy`/`flake8` config found anywhere); don't assume one runs in CI.
+test suite. There is no linter or type-checker configured in this repository as a permanent
+dependency or CI gate — **there is no CI pipeline in this repository at all** (see
+`RELEASE_READINESS.md`). `ruff` and `mypy` were installed ad hoc to audit the codebase
+(`SECURITY_AUDIT.md`/`TEST_REPORT.md`) and are worth running the same way before a PR:
+
+```bash
+pip install ruff mypy
+ruff check src tests --select E,F,B,S,ASYNC,C4,SIM,RUF   # bug/security-focused ruleset;
+                                                           # --select ALL is mostly docstring/
+                                                           # style noise for this codebase
+mypy src/enterprise_os --ignore-missing-imports
+```
+
+Don't assume either runs automatically — nothing currently enforces this.
 
 ## Running tests
 
@@ -22,8 +34,8 @@ pytest tests/unit/governance/             # a subdirectory
 pytest tests/unit/runtime/test_runtime.py -v              # one file, verbose
 ```
 
-At v1.0: 115 passed, 1 skipped, 91% coverage. See `CURRENT_STATE.md`/`V1_RELEASE_PLAN.md`
-for exactly what's covered and what isn't.
+At v1.0 (after round 2): 124 passed, 1 skipped, 92% coverage. See `TEST_REPORT.md` for
+exactly what's covered and what isn't, and for the reasoning behind every gap.
 
 Some tests (`tests/unit/interfaces/*`) import `enterprise_os.interfaces.api.ceo_api`, which
 has module-level side effects — it creates `sessions/` and `logs/` directories relative to

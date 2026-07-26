@@ -10,6 +10,17 @@ nothing is carried over from prior reports without re-verification._
 > repository. Those are runtime artifacts from a local run on a different machine, not part
 > of the source tree. This report describes only what is actually committed.
 
+> **Round-2 addendum:** a second hardening pass ran `ruff`/`mypy`/`pip-audit` against this
+> codebase for the first time and found several real issues beyond round 1's scope,
+> including a security-severity one (`GIT_EXECUTE` completely bypassing
+> `CommandRestrictionPolicy` — the same `subprocess.run(shell=True)` surface as
+> `SHELL_EXECUTE`, but ungated) and a genuinely orphaned third FastAPI app
+> (`interfaces/api/main.py`, unreferenced anywhere, since deleted). All fixed, tested, and
+> recorded in `SECURITY_AUDIT.md`/`TECHNICAL_DEBT.md`/`RELEASE_READINESS.md` rather than
+> folded into this file's prose — this file's per-section detail below reflects round 1;
+> the round-2 docs are the current source of truth for what changed after it. Test suite as
+> of round 2: **124 passed, 1 skipped, 0 failed, 92% coverage**.
+
 ## 1. Project Version and Maturity
 
 **Version:** v1.0 Release Candidate, single squashed commit — there is no incremental git

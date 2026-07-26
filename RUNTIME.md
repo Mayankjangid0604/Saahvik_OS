@@ -58,9 +58,14 @@ a blank session, and even after that was fixed, plan/step history still wasn't
 round-tripped — both fixed; see `V1_RELEASE_PLAN.md` P0-3 and P1-6.)
 
 `FileAuditLog` subscribes to a configurable list of event types and writes one JSON line per
-event to `<log_dir>/audit.log`. Each instance uses its own uniquely-scoped `logging.Logger`
-(a v1.0 fix — previously a fixed logger name meant multiple `FileAuditLog` instances in the
-same process silently shared one instance's log destination; see `V1_RELEASE_PLAN.md` P1-7).
+event to `<log_dir>/audit.log`. Each instance uses its own uniquely-scoped `logging.Logger`,
+named from a monotonic counter (a round-1 fix — previously a fixed logger name meant
+multiple `FileAuditLog` instances in the same process silently shared one instance's log
+destination — plus a round-2 fix to the fix itself: the counter replaced an `id(self)`-based
+scheme that could collide under garbage-collection churn and reintroduce the exact same
+bug; see `SECURITY_AUDIT.md` SEC-7). `FileAuditLog.close()` detaches and closes the
+instance's handler for callers that construct many short-lived instances and want to
+release the underlying file descriptor deterministically.
 
 ## Events
 

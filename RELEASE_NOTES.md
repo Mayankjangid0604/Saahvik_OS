@@ -1,5 +1,60 @@
 # Release Notes
 
+## v1.0 RC — Second Hardening Pass (Round 2)
+
+A second pass, this time starting from static analysis (`ruff`, `mypy`) and a dependency
+audit (`pip-audit`) rather than manual reading — none of which had been run before. Full
+detail in [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md), [`TECHNICAL_DEBT.md`](TECHNICAL_DEBT.md),
+[`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md), [`TEST_REPORT.md`](TEST_REPORT.md), and
+[`RELEASE_READINESS.md`](RELEASE_READINESS.md).
+
+Test suite: **115 passed / 0 failed / 1 skipped, 91% coverage → 124 passed / 0 failed / 1
+skipped, 92% coverage.**
+
+**Two findings beyond round 1's scope, both severity-worthy:**
+- **`GIT_EXECUTE` completely bypassed `CommandRestrictionPolicy`.** `GitProvider` runs the
+  identical `subprocess.run(shell=True)` injection surface as `ShellProvider`, but the policy
+  hardened in round 1 only ever checked `SHELL_EXECUTE` requests. Found via
+  `ruff check --select S602`, reproduced live, fixed by widening the policy's gated tool
+  names — reusing all of round 1's hardened logic unchanged.
+- **A real regression in round 1's own P1-7 fix.** That fix scoped `FileAuditLog`'s logger
+  name with `id(self)` to stop instances from sharing a handler — but `id()` is only unique
+  among simultaneously-alive objects, not across time, and a construct-and-discard pattern
+  can make CPython reuse a freed instance's address, silently reintroducing the exact bug
+  the fix was meant to prevent. Reproduced live with a 50-iteration churn test. Fixed with a
+  monotonic counter instead.
+
+**Also found and fixed:**
+- A genuinely orphaned third FastAPI app (`interfaces/api/main.py`) — hardcoded/mocked
+  responses, zero auth, zero policy enforcement, referenced nowhere in the repo. Deleted.
+- An `asyncio.create_task()` call with no stored reference in `startup_event()` — a
+  documented asyncio gotcha where the WebSocket broadcast task could be garbage-collected
+  mid-execution. Fixed by storing the task reference.
+- `ToolRegistry.auto_discover()` silently swallowed any exception from constructing a tool
+  provider, meaning the tool platform could silently register fewer capabilities than
+  expected with zero trace. Now logs a warning and still registers every other provider.
+- `OllamaProvider.embed()` didn't validate `model_name` was present before use, unlike every
+  other method on the same class — found via `mypy`. Fixed with the same guard.
+- 5 `raise-without-from` exception-chaining bugs, 2 duplicate imports, 1 dead computed value
+  (and its now-orphaned private method), 25 unused imports, and 6 implicit-`Optional` type
+  hints — all mechanical, all verified with the full suite after each change.
+- README.md was rewritten: it described a "Milestone 01/02" state that predated the entire
+  v1.0 RC codebase, explicitly claiming no tool usage and no model calls existed — both
+  false for the actual current system.
+
+**Deliberately not fixed, and why:** `PYTHON_EXECUTE` has zero governance policy coverage —
+arbitrary Python code is at least as powerful as unrestricted shell access. This was **not**
+given a blocklist-style fix: Python's own introspection defeats string/AST blocklisting far
+more easily than shell commands do, so a naive check would create false confidence while
+adding real complexity — assessed as worse than no check at all. A real fix needs actual
+sandboxing, out of scope for a hardening pass explicitly told not to redesign the
+architecture. See `SECURITY_AUDIT.md` SEC-11.
+
+**Also newly documented, not silently accepted:** no CI pipeline exists in this repository
+at all — confirmed via the PR's check-runs API returning zero checks. Linting, type
+checking, and the dependency audit were all run ad hoc for this pass, not wired into any
+automated gate. See `RELEASE_READINESS.md`.
+
 ## v1.0 RC — Hardening Pass
 
 This release closes every P0 (critical) and P1/P2/P3 (reliability/security/performance)

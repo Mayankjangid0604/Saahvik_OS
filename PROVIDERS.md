@@ -29,7 +29,7 @@ a capability enum, a registry, a router, and self-registering concrete implement
 | `FilesystemProvider` | `FILE_READ`, `FILE_WRITE`, `FILE_LIST` | Confined to `workspace_root` via `Path.is_relative_to()` (hardened in v1.0 — see `SECURITY.md`). |
 | `ShellProvider` | `SHELL_EXECUTE` | `subprocess.run(shell=True)`; gated by `CommandRestrictionPolicy` (see `GOVERNANCE.md`). |
 | `PythonProvider` | `PYTHON_EXECUTE` | Executes Python scripts. |
-| `GitProvider` | `GIT_EXECUTE` | Git command execution. |
+| `GitProvider` | `GIT_EXECUTE` | Git command execution via `subprocess.run(shell=True)`; gated by `CommandRestrictionPolicy` alongside `SHELL_EXECUTE` (round-2 fix — see `SECURITY.md`; previously ungated). |
 | `BrowserProvider` | `BROWSER_NAVIGATE`, `BROWSER_CLICK`, `BROWSER_READ` | Browser automation. |
 
 A `ToolRequest.tool_name` is always the enum member's `.name` (e.g. `"FILE_READ"`), set by
