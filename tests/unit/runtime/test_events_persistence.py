@@ -134,3 +134,34 @@ def test_file_audit_log_instances_do_not_share_a_handler(tmp_path: Path):
     log_b = (dir_b / "audit.log").read_text()
     assert "ga" in log_a and "gb" not in log_a
     assert "gb" in log_b and "ga" not in log_b
+
+def test_file_audit_log_survives_construct_and_discard_churn(tmp_path: Path):
+    """Regression test for a second-order bug in the P1-7 fix itself: the
+    first fix scoped the logger name with id(self), but id() is only
+    guaranteed unique among *simultaneously alive* objects, not across time.
+    A tight construct-and-immediately-discard loop lets CPython reuse a freed
+    instance's memory address for a later instance, so id() collides and the
+    later instance silently inherits the earlier (unrelated, wrong-directory)
+    instance's logger and handler -- reproduced directly during a round-2
+    audit before switching to a monotonic counter."""
+    churn_dir = tmp_path / "churn"
+    for _ in range(50):
+        FileAuditLog(log_dir=str(churn_dir))  # constructed and immediately discarded
+
+    real_dir = tmp_path / "real"
+    audit = FileAuditLog(log_dir=str(real_dir))
+    dispatcher = EventDispatcher()
+    audit.bind_to(dispatcher, [GoalCreated])
+    dispatcher.dispatch(GoalCreated(session_id="s", goal_id="should-be-in-real-dir", description="d"))
+
+    real_log = real_dir / "audit.log"
+    assert real_log.exists()
+    assert "should-be-in-real-dir" in real_log.read_text()
+    churn_log = churn_dir / "audit.log"
+    assert not churn_log.exists() or "should-be-in-real-dir" not in churn_log.read_text()
+
+def test_file_audit_log_close_releases_its_handler(tmp_path: Path):
+    audit = FileAuditLog(log_dir=str(tmp_path))
+    assert len(audit.logger.handlers) == 1
+    audit.close()
+    assert len(audit.logger.handlers) == 0

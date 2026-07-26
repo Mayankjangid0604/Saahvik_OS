@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 from pathlib import Path
@@ -72,16 +73,22 @@ class FileSessionRepository(SessionRepository):
         return Plan(id=data["id"], goal_id=data["goal_id"], steps=steps, current_step_index=data["current_step_index"])
 
 class FileAuditLog(AuditLog):
+    # A fixed logger name (e.g. "AuditLog") is a process-wide singleton in
+    # Python's logging module, and id(self) is *not* a safe substitute: it is
+    # only guaranteed unique among simultaneously-alive objects, not across
+    # time. A FileAuditLog constructed and dropped without being held (e.g.
+    # a tight construct-and-discard loop) can be immediately garbage
+    # collected, and CPython frequently reuses that freed memory address for
+    # the very next same-sized allocation -- so a later instance can get the
+    # exact same id() and silently inherit the earlier instance's logger and
+    # handler, writing to its log_dir instead of its own. Reproduced directly
+    # before this fix. A monotonic counter has no such collision risk.
+    _instance_counter = itertools.count()
+
     def __init__(self, log_dir: str = "logs") -> None:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        # A fixed logger name (e.g. "AuditLog") is a process-wide singleton in
-        # Python's logging module: the *first* FileAuditLog instantiated would
-        # win the "if not self.logger.handlers" race and every later instance
-        # would silently keep writing to the first instance's log_dir,
-        # regardless of what log_dir it was constructed with. Scope the logger
-        # name per instance so each FileAuditLog genuinely owns its own file.
-        self.logger = logging.getLogger(f"AuditLog.{id(self)}")
+        self.logger = logging.getLogger(f"AuditLog.{next(self._instance_counter)}")
         self.logger.setLevel(logging.INFO)
         self.logger.propagate = False
         if not self.logger.handlers:
@@ -89,7 +96,18 @@ class FileAuditLog(AuditLog):
             formatter = logging.Formatter('%(message)s') # Timestamp is in the event already
             fh.setFormatter(formatter)
             self.logger.addHandler(fh)
-            
+
+    def close(self) -> None:
+        """Detach and close this instance's log handler(s), releasing the
+        underlying file descriptor. Not required for the long-lived
+        single-instance-per-process production usage (ceo_api.py), but
+        matters for callers (e.g. tests) that construct many short-lived
+        instances, since logging.Logger.manager never releases entries from
+        its own global registry on its own."""
+        for handler in list(self.logger.handlers):
+            self.logger.removeHandler(handler)
+            handler.close()
+
     def bind_to(self, dispatcher: EventDispatcher, event_types: list[type]) -> None:
         for etype in event_types:
             dispatcher.subscribe(etype, self.log_event)
